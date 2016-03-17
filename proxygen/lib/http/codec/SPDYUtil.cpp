@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,11 +7,10 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/SPDYUtil.h"
-
-#include "proxygen/lib/http/RFC2616.h"
+#include <proxygen/lib/http/codec/SPDYUtil.h>
 
 #include <folly/ThreadLocal.h>
+#include <proxygen/lib/http/RFC2616.h>
 
 namespace proxygen {
 
@@ -66,7 +65,7 @@ bool SPDYUtil::hasGzipAndDeflate(const std::string& value, bool& hasGzip,
   hasDeflate = false;
   RFC2616::parseQvalues(value, *output);
   for (const auto& encodingQ: *output) {
-    std::string lower(std::move(encodingQ.first.str()));
+    std::string lower(encodingQ.first.str());
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
     // RFC says 3 sig figs
     if (lower == "gzip" && encodingQ.second >= 0.001) {

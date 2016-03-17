@@ -2,13 +2,11 @@ SUBDIRS = . codec session test
 
 BUILT_SOURCES = HTTPCommonHeaders.h HTTPCommonHeaders.cpp
 
-CommonHeadersGen: HTTPCommonHeaders.template.h HTTPCommonHeaders.template.gperf HTTPCommonHeaders.txt
-	INSTALLED_GPERF=1 FBCODE_DIR=$(top_srcdir)/.. INSTALL_DIR=$(srcdir) ruby generate_http_gperfs.rb
-	touch CommonHeadersGen
+HTTPCommonHeaders.h: HTTPCommonHeaders.template.h HTTPCommonHeaders.txt
+	FBCODE_DIR=$(top_srcdir)/.. INSTALL_DIR=$(srcdir) HEADERS_LIST=$(srcdir)/HTTPCommonHeaders.txt ./gen_HTTPCommonHeaders.h.sh
 
-HTTPCommonHeaders.h: CommonHeadersGen
-
-HTTPCommonHeaders.cpp: CommonHeadersGen
+HTTPCommonHeaders.cpp: HTTPCommonHeaders.template.gperf HTTPCommonHeaders.txt
+	FBCODE_DIR=$(top_srcdir)/.. INSTALL_DIR=$(srcdir) HEADERS_LIST=$(srcdir)/HTTPCommonHeaders.txt ./gen_HTTPCommonHeaders.cpp.sh
 
 noinst_LTLIBRARIES = libproxygenhttp.la
 
@@ -33,9 +31,12 @@ nobase_libproxygenhttp_HEADERS = \
 	codec/HTTP1xCodec.h \
 	codec/HTTPChecks.h \
 	codec/HTTPCodec.h \
+	codec/HTTPCodecFactory.h \
 	codec/HTTPCodecFilter.h \
+	codec/HTTPCodecPrinter.h \
 	codec/HTTPSettings.h \
 	codec/SPDYCodec.h \
+	codec/HTTPParallelCodec.h \
 	codec/SPDYConstants.h \
 	codec/SPDYUtil.h \
 	codec/SPDYVersion.h \
@@ -58,9 +59,22 @@ nobase_libproxygenhttp_HEADERS = \
 	codec/compress/Huffman.h \
 	codec/compress/Logging.h \
 	codec/compress/StaticHeaderTable.h \
+	codec/compress/experimental/hpack9/HPACKCodec.h \
+	codec/compress/experimental/hpack9/HPACKConstants.h \
+	codec/compress/experimental/hpack9/HPACKContextImpl.h \
+	codec/compress/experimental/hpack9/HPACKDecoder.h \
+	codec/compress/experimental/hpack9/HPACKEncoder.h \
+	codec/compress/experimental/hpack9/Huffman.h \
+	codec/compress/experimental/hpack9/StaticHeaderTable.h \
+	codec/HTTPRequestVerifier.h \
+	codec/HTTP2Codec.h \
+	codec/HTTP2Constants.h \
+	codec/HTTP2Framer.h \
+	session/AckLatencyEvent.h \
 	session/ByteEventTracker.h \
 	session/ByteEvents.h \
 	session/CodecErrorResponseHandler.h \
+	session/HTTPDefaultSessionCodecFactory.h \
 	session/HTTPDirectResponseHandler.h \
 	session/HTTPDownstreamSession.h \
 	session/HTTPErrorPage.h \
@@ -73,7 +87,9 @@ nobase_libproxygenhttp_HEADERS = \
 	session/HTTPTransactionEgressSM.h \
 	session/HTTPTransactionIngressSM.h \
 	session/HTTPUpstreamSession.h \
+	session/HTTP2PriorityQueue.h \
 	session/SimpleController.h \
+	session/TTLBAStats.h \
 	session/TransportFilter.h
 
 libproxygenhttp_la_SOURCES = \
@@ -91,13 +107,24 @@ libproxygenhttp_la_SOURCES = \
 	codec/compress/Huffman.cpp \
 	codec/compress/Logging.cpp \
 	codec/compress/StaticHeaderTable.cpp \
+	codec/compress/experimental/hpack9/HPACKCodec.cpp \
+	codec/compress/experimental/hpack9/HPACKDecoder.cpp \
+	codec/compress/experimental/hpack9/HPACKEncoder.cpp \
+	codec/compress/experimental/hpack9/Huffman.cpp \
+	codec/compress/experimental/hpack9/StaticHeaderTable.cpp \
 	codec/ErrorCode.cpp \
+	codec/HTTP2Codec.cpp \
+	codec/HTTP2Constants.cpp \
+	codec/HTTP2Framer.cpp \
 	codec/FlowControlFilter.cpp \
 	codec/HTTP1xCodec.cpp \
 	codec/HTTPChecks.cpp \
+	codec/HTTPCodecFactory.cpp \
 	codec/HTTPCodecFilter.cpp \
+	codec/HTTPCodecPrinter.cpp \
 	codec/HTTPSettings.cpp \
 	codec/SPDYCodec.cpp \
+	codec/HTTPParallelCodec.cpp \
 	codec/SPDYConstants.cpp \
 	codec/SPDYUtil.cpp \
 	codec/SettingsId.cpp \
@@ -112,6 +139,7 @@ libproxygenhttp_la_SOURCES = \
 	RFC2616.cpp \
 	session/ByteEvents.cpp \
 	session/CodecErrorResponseHandler.cpp \
+	session/HTTPDefaultSessionCodecFactory.cpp \
 	session/HTTPDirectResponseHandler.cpp \
 	session/HTTPDownstreamSession.cpp \
 	session/HTTPErrorPage.cpp \
@@ -122,6 +150,7 @@ libproxygenhttp_la_SOURCES = \
 	session/HTTPTransactionEgressSM.cpp \
 	session/HTTPTransactionIngressSM.cpp \
 	session/HTTPUpstreamSession.cpp \
+	session/HTTP2PriorityQueue.cpp \
 	session/ByteEventTracker.cpp \
 	session/SimpleController.cpp \
 	session/TransportFilter.cpp \

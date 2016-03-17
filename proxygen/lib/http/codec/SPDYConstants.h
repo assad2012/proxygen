@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/ErrorCode.h"
-#include "proxygen/lib/http/codec/SettingsId.h"
-
 #include <boost/optional/optional.hpp>
+#include <proxygen/lib/http/codec/ErrorCode.h>
+#include <proxygen/lib/http/codec/SettingsId.h>
 #include <string>
 
 namespace proxygen { namespace spdy {
@@ -122,8 +121,10 @@ extern const std::string kNamePathv3;
 extern const std::string kNameSchemev2;
 extern const std::string kNameSchemev3;
 extern const std::string kNameHostv3;
-extern const std::string https;
-extern const std::string http;
+
+extern const std::string kVersionStrv2;
+extern const std::string kVersionStrv3;
+extern const std::string kVersionStrv31;
 
 extern const size_t SPDY_PRIO_SHIFT_FACTOR;
 

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,9 +7,9 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/utils/TraceEvent.h"
+#include <proxygen/lib/utils/TraceEvent.h>
+#include <proxygen/lib/utils/UnionBasedStatic.h>
 
-#include <folly/DynamicConverter.h>
 #include <folly/ThreadLocal.h>
 #include <random>
 #include <sstream>
@@ -17,14 +17,15 @@
 
 namespace {
 
+DEFINE_UNION_STATIC_UNION_IMPL(std::mutex, Mutex, s_mtx);
+DEFINE_UNION_STATIC_UNION_IMPL(std::mt19937, Mt19937, s_generator);
+
 class TraceEventIDGenerator {
  public:
   TraceEventIDGenerator() {
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> lock(mtx);
-    static std::mt19937 generator;
+    std::lock_guard<std::mutex> lock(s_mtx.data);
     std::uniform_int_distribution<uint32_t> distribution;
-    nextID_ = distribution(generator);
+    nextID_ = distribution(s_generator.data);
   }
 
   uint32_t nextID() {
@@ -38,11 +39,34 @@ class TraceEventIDGenerator {
 }
 
 namespace proxygen {
+
+  // Helpers used to make TraceEventType/TraceFieldType can be used with GLOG
+std::ostream& operator<<(std::ostream& os, TraceEventType eventType) {
+  os << getTraceEventTypeString(eventType);
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, TraceFieldType fieldType) {
+  os << getTraceFieldTypeString(fieldType);
+  return os;
+}
+
+
+DEFINE_UNION_STATIC_UNION_IMPL(folly::ThreadLocal<TraceEventIDGenerator>,
+                    TraceEventIDGenerator,
+                    s_idGenerator);
+
+__attribute__((__constructor__))
+void initIDGeneratorUnion() {
+  new (&s_mtx.data) std::mutex();
+  new (&s_generator.data) std::mt19937();
+  new (&s_idGenerator.data) folly::ThreadLocal<TraceEventIDGenerator>();
+}
+
 TraceEvent::TraceEvent(TraceEventType type, uint32_t parentID):
   type_(type),
+  id_(s_idGenerator.data->nextID()),
   parentID_(parentID) {
-  static folly::ThreadLocal<TraceEventIDGenerator> idGenerator;
-  id_ = idGenerator->nextID();
 }
 
 void TraceEvent::start(const TimeUtil& tm) {
@@ -73,7 +97,14 @@ bool TraceEvent::hasEnded() const {
   return stateFlags_ & State::ENDED;
 }
 
-bool TraceEvent::addMeta(TraceFieldType key, folly::dynamic&& value) {
+bool TraceEvent::readBoolMeta(TraceFieldType key, bool& dest) const {
+  return readMeta(key, dest);
+}
+
+bool TraceEvent::readStrMeta(TraceFieldType key, std::string& dest) const {
+  return readMeta(key, dest);
+}
+bool TraceEvent::addMetaInternal(TraceFieldType key, MetaData&& value) {
   auto rc = metaData_.emplace(key, value);
 
   // replace if key already exist
@@ -82,24 +113,6 @@ bool TraceEvent::addMeta(TraceFieldType key, folly::dynamic&& value) {
   }
 
   return rc.second;
-}
-
-bool TraceEvent::readBoolMeta(TraceFieldType key, bool& dest) const {
-  if (metaData_.count(key)) {
-    DCHECK(metaData_.at(key).isBool());
-    dest = metaData_.at(key).asBool();
-    return true;
-  }
-  return false;
-}
-
-bool TraceEvent::readStrMeta(TraceFieldType key, std::string& dest) const {
-  if (metaData_.count(key)) {
-    // no need to check if value is string type
-    dest = metaData_.at(key).asString().toStdString();
-    return true;
-  }
-  return false;
 }
 
 std::string TraceEvent::toString() const {
@@ -115,9 +128,11 @@ std::string TraceEvent::toString() const {
   out << "start='" << startSinceEpoch << "', ";
   out << "end='" << endSinceEpoch << "', ";
   out << "metaData='{";
-  for (auto data : metaData_) {
-    out << getTraceFieldTypeString(data.first) << ": "
-        << folly::convertTo<std::string>(data.second) << ", ";
+  auto itr = getMetaDataItr();
+  while (itr.isValid()) {
+    out << getTraceFieldTypeString(itr.getKey()) << ": "
+        << itr.getValueAs<std::string>() << ", ";
+    itr.next();
   }
   out << "}')";
   return out.str();

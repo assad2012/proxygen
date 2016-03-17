@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,15 +7,16 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKEncodeBuffer.h"
-
-#include "proxygen/lib/http/codec/compress/HPACKConstants.h"
-#include "proxygen/lib/http/codec/compress/Logging.h"
+#include <proxygen/lib/http/codec/compress/HPACKEncodeBuffer.h>
 
 #include <ctype.h>
 #include <memory>
+#include <proxygen/lib/http/codec/compress/HPACKConstants.h>
+#include <proxygen/lib/http/codec/compress/Logging.h>
+#include <proxygen/lib/utils/Logging.h>
 
 using folly::IOBuf;
+using proxygen::huffman::HuffTree;
 using std::string;
 using std::unique_ptr;
 
@@ -23,12 +24,19 @@ namespace proxygen {
 
 HPACKEncodeBuffer::HPACKEncodeBuffer(
   uint32_t growthSize,
-  HPACK::MessageType msgType,
-  bool huffman) :
+  const HuffTree& huffmanTree,
+  bool huffmanEnabled) :
     growthSize_(growthSize),
     buf_(&bufQueue_, growthSize),
-    msgType_(msgType),
-    huffman_(huffman) {
+    huffmanTree_(huffmanTree),
+    huffmanEnabled_(huffmanEnabled) {
+}
+
+HPACKEncodeBuffer::HPACKEncodeBuffer(uint32_t growthSize) :
+    growthSize_(growthSize),
+    buf_(&bufQueue_, growthSize),
+    huffmanTree_(huffman::reqHuffTree05()),
+    huffmanEnabled_(false) {
 }
 
 void HPACKEncodeBuffer::addHeadroom(uint32_t headroom) {
@@ -41,10 +49,7 @@ void HPACKEncodeBuffer::addHeadroom(uint32_t headroom) {
 }
 
 void HPACKEncodeBuffer::append(uint8_t byte) {
-  buf_.ensure(1);
-  uint8_t* data = buf_.writableData();
-  *data = byte;
-  buf_.append(1);
+  buf_.push(&byte, 1);
 }
 
 uint32_t HPACKEncodeBuffer::encodeInteger(uint32_t value, uint8_t prefix,
@@ -81,32 +86,29 @@ uint32_t HPACKEncodeBuffer::encodeInteger(uint32_t value, uint8_t prefix,
 }
 
 uint32_t HPACKEncodeBuffer::encodeHuffman(const std::string& literal) {
-  uint32_t size = huffman::getSize(literal, msgType_);
+  uint32_t size = huffmanTree_.getEncodeSize(literal);
   // add the length
   uint32_t count = encodeInteger(size, HPACK::LiteralEncoding::HUFFMAN, 7);
   // ensure we have enough bytes before performing the encoding
-  buf_.ensure(size);
-  count += huffman::encode(literal, msgType_, buf_);
+  count += huffmanTree_.encode(literal, buf_);
   return count;
 }
 
 uint32_t HPACKEncodeBuffer::encodeLiteral(const std::string& literal) {
-  if (huffman_) {
+  if (huffmanEnabled_) {
     return encodeHuffman(literal);
   }
   // otherwise use simple layout
   uint32_t count =
     encodeInteger(literal.size(), HPACK::LiteralEncoding::PLAIN, 7);
   // copy the entire string
-  buf_.ensure(literal.size());
-  memcpy(buf_.writableData(), literal.c_str(), literal.size());
-  buf_.append(literal.size());
+  buf_.push((uint8_t*)literal.c_str(), literal.size());
   count += literal.size();
   return count;
 }
 
-string HPACKEncodeBuffer::toBin(uint8_t bytesPerLine) {
-  return dumpBin(bufQueue_.front(), bytesPerLine);
+string HPACKEncodeBuffer::toBin() {
+  return IOBufPrinter::printBin(bufQueue_.front());
 }
 
 }

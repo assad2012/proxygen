@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,12 +7,11 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/RFC2616.h"
-
-#include "proxygen/lib/http/HTTPHeaders.h"
+#include <proxygen/lib/http/RFC2616.h>
 
 #include <folly/String.h>
 #include <folly/ThreadLocal.h>
+#include <proxygen/lib/http/HTTPHeaders.h>
 
 namespace proxygen { namespace RFC2616 {
 

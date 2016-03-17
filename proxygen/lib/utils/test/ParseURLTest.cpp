@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,9 +7,8 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/utils/ParseURL.h"
-
 #include <gtest/gtest.h>
+#include <proxygen/lib/utils/ParseURL.h>
 
 using proxygen::ParseURL;
 using std::string;
@@ -114,6 +113,8 @@ TEST(ParseURL, InvalidURL) {
   testParseURL("#?hello", "", "", "", 0, "", false);
   testParseURL("[::1/foo?bar", "", "", "", 0, "", false);
   testParseURL("", "", "", "", 0, "", false);
+  testParseURL("http://tel:198433511/test\n", "", "", "", 0, "", false);
+  testParseURL("/test\n", "", "", "", 0, "", false);
 }
 
 TEST(ParseURL, IsHostIPAddress) {

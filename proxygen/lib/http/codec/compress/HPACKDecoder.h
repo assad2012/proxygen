@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,31 +9,34 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKContext.h"
-#include "proxygen/lib/http/codec/compress/HPACKDecodeBuffer.h"
-#include "proxygen/lib/http/codec/compress/HPACKHeader.h"
-
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
 #include <list>
 #include <memory>
+#include <proxygen/lib/http/codec/compress/HeaderCodec.h>
+#include <proxygen/lib/http/codec/compress/HPACKContext.h>
+#include <proxygen/lib/http/codec/compress/HPACKDecodeBuffer.h>
+#include <proxygen/lib/http/codec/compress/HPACKHeader.h>
 #include <vector>
 
 namespace proxygen {
 
 class HPACKDecoder : public HPACKContext {
  public:
-  enum Error : uint8_t {
-    NONE = 0,
-    INVALID_INDEX = 1,
-    INVALID_HUFFMAN_CODE = 2,
-    INVALID_ENCODING = 3,
-    BUFFER_OVERFLOW = 4,
+  enum Version: uint8_t {
+    HPACK05 = 0,
+    HPACK09 = 1,
   };
 
-  explicit HPACKDecoder(HPACK::MessageType msgType,
-                        uint32_t tableSize=HPACK::kTableSize)
-      : HPACKContext(msgType, tableSize) {}
+  explicit HPACKDecoder(
+    HPACK::MessageType msgType,
+    uint32_t tableSize=HPACK::kTableSize,
+    uint32_t maxUncompressed=HeaderCodec::kMaxUncompressed,
+    Version version=Version::HPACK05)
+      : HPACKContext(msgType, tableSize),
+        maxTableSize_(tableSize),
+        maxUncompressed_(maxUncompressed),
+        version_(version) {}
 
   typedef std::vector<HPACKHeader> headers_t;
 
@@ -44,6 +47,15 @@ class HPACKDecoder : public HPACKContext {
   uint32_t decode(folly::io::Cursor& cursor,
                   uint32_t totalBytes,
                   headers_t& headers);
+
+  /**
+   * given a Cursor and a total amount of bytes we can consume from it,
+   * decode headers and invoke a callback.
+   */
+  uint32_t decodeStreaming(folly::io::Cursor& cursor,
+                           uint32_t totalBytes,
+                           HeaderCodec::StreamingCallback* streamingCb);
+
   /**
    * given a compressed header block as an IOBuf chain, decode all the
    * headers and return them. This is just a convenience wrapper around
@@ -51,28 +63,40 @@ class HPACKDecoder : public HPACKContext {
    */
   std::unique_ptr<headers_t> decode(const folly::IOBuf* buffer);
 
-  Error getError() const {
+  HPACK::DecodeError getError() const {
     return err_;
   }
 
   bool hasError() const {
-    return err_ != Error::NONE;
+    return err_ != HPACK::DecodeError::NONE;
   }
 
- private:
+  void setHeaderTableMaxSize(uint32_t maxSize) {
+    maxTableSize_ = maxSize;
+  }
+
+ protected:
   bool isValid(uint32_t index);
 
-  void emitRefset(headers_t& emitted);
+  virtual uint32_t emitRefset(headers_t& emitted);
 
-  void emit(const HPACKHeader& header, headers_t& emitted);
+  virtual const huffman::HuffTree& getHuffmanTree() const;
 
-  void decodeIndexedHeader(HPACKDecodeBuffer& dbuf, headers_t& emitted);
+  uint32_t emit(const HPACKHeader& header, headers_t* emitted);
 
-  void decodeLiteralHeader(HPACKDecodeBuffer& dbuf, headers_t& emitted);
+  virtual uint32_t decodeIndexedHeader(HPACKDecodeBuffer& dbuf,
+                                       headers_t* emitted);
 
-  void decodeHeader(HPACKDecodeBuffer& dbuf, headers_t& emitted);
+  virtual uint32_t decodeLiteralHeader(HPACKDecodeBuffer& dbuf,
+                                       headers_t* emitted);
 
-  Error err_{Error::NONE};
+  uint32_t decodeHeader(HPACKDecodeBuffer& dbuf, headers_t* emitted);
+
+  HPACK::DecodeError err_{HPACK::DecodeError::NONE};
+  uint32_t maxTableSize_;
+  uint32_t maxUncompressed_;
+  HeaderCodec::StreamingCallback* streamingCb_{nullptr};
+  Version version_;
 };
 
 }

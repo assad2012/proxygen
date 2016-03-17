@@ -25,17 +25,17 @@ noinst_LTLIBRARIES = libutils.la
 # We put the generated files first so that we create them first
 libutilsdir = $(includedir)/proxygen/lib/utils
 nobase_libutils_HEADERS = \
+	AsyncTimeoutSet.h \
+	ChromeUtils.h \
 	CobHelper.h \
 	CryptUtil.h \
 	DestructorCheck.h \
-	DomainNameMisc.h \
 	Exception.h \
+	Export.h \
 	FilterChain.h \
 	HTTPTime.h \
-	NullTraceEventObserver.h \
 	ParseURL.h \
 	Result.h \
-	SocketOptions.h \
 	StateMachine.h \
 	TestUtils.h \
 	Time.h \
@@ -44,19 +44,32 @@ nobase_libutils_HEADERS = \
 	TraceEventObserver.h \
 	TraceEventType.h \
 	TraceFieldType.h \
-	UtilInl.h
+	RendezvousHash.h \
+	ConsistentHash.h \
+	URL.h \
+	UtilInl.h \
+	Logging.h \
+	ZlibStreamCompressor.h \
+	ZlibStreamDecompressor.h \
+	WheelTimerInstance.h \
+	SharedWheelTimer.h
 
 # We put the generated files first so that we create them first
 libutils_la_SOURCES = \
 	../../external/http_parser/http_parser_cpp.cpp \
+	AsyncTimeoutSet.cpp \
+	ChromeUtils.cpp \
 	Exception.cpp \
 	HTTPTime.cpp \
-	NullTraceEventObserver.cpp \
+	TraceEventContext.cpp \
 	ParseURL.cpp \
-	SocketOptions.cpp \
 	TraceEvent.cpp \
 	TraceEventType.cpp \
-	TraceEventType.cpp \
 	TraceFieldType.cpp \
-	TraceFieldType.cpp \
-  CryptUtil.cpp
+	RendezvousHash.cpp \
+	Logging.cpp \
+	CryptUtil.cpp \
+	ZlibStreamCompressor.cpp \
+	ZlibStreamDecompressor.cpp \
+	WheelTimerInstance.cpp \
+	SharedWheelTimer.cpp

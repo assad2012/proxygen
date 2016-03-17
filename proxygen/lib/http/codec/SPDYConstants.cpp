@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,7 +7,7 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/SPDYConstants.h"
+#include <proxygen/lib/http/codec/SPDYConstants.h>
 
 namespace proxygen { namespace spdy {
 
@@ -26,6 +26,7 @@ GoawayStatusCode errorCodeToGoaway(ErrorCode code) {
     case ErrorCode::CONNECT_ERROR:        break;
     case ErrorCode::ENHANCE_YOUR_CALM:    break;
     case ErrorCode::INADEQUATE_SECURITY:  break;
+    case ErrorCode::HTTP_1_1_REQUIRED:    break;
     case ErrorCode::_SPDY_INVALID_STREAM: break;
   }
   return GOAWAY_PROTOCOL_ERROR;
@@ -46,6 +47,7 @@ ResetStatusCode errorCodeToReset(ErrorCode code) {
     case ErrorCode::CONNECT_ERROR: break;
     case ErrorCode::ENHANCE_YOUR_CALM: break;
     case ErrorCode::INADEQUATE_SECURITY: return RST_INVALID_CREDENTIALS;
+    case ErrorCode::HTTP_1_1_REQUIRED: break;
     case ErrorCode::_SPDY_INVALID_STREAM: return RST_INVALID_STREAM;
   }
   return RST_PROTOCOL_ERROR;
@@ -145,8 +147,10 @@ const std::string kNamePathv3(":path");
 const std::string kNameSchemev2("scheme");
 const std::string kNameSchemev3(":scheme");
 const std::string kNameHostv3(":host"); // SPDY v3 only
-const std::string https("https");
-const std::string http("http");
+
+const std::string kVersionStrv2("spdy/2");
+const std::string kVersionStrv3("spdy/3");
+const std::string kVersionStrv31("spdy/3.1");
 
 // In the future, we may be shifting the SPDY wire priority
 // by this much so we can easily use the lower bits to do our

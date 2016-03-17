@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,13 +9,12 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKConstants.h"
-#include "proxygen/lib/http/codec/compress/HPACKContext.h"
-#include "proxygen/lib/http/codec/compress/HPACKEncodeBuffer.h"
-#include "proxygen/lib/http/codec/compress/HeaderTable.h"
-
 #include <folly/io/IOBuf.h>
 #include <list>
+#include <proxygen/lib/http/codec/compress/HPACKConstants.h>
+#include <proxygen/lib/http/codec/compress/HPACKContext.h>
+#include <proxygen/lib/http/codec/compress/HPACKEncodeBuffer.h>
+#include <proxygen/lib/http/codec/compress/HeaderTable.h>
 #include <vector>
 
 namespace proxygen {
@@ -25,29 +24,38 @@ class HPACKEncoder : public HPACKContext {
  public:
   HPACKEncoder(HPACK::MessageType msgType,
                bool huffman,
-               uint32_t tableSize=HPACK::kTableSize) :
-      HPACKContext(msgType, tableSize),
-      huffman_(huffman),
-      buffer_(kBufferGrowth, msgType, huffman) {
-  }
+               uint32_t tableSize=HPACK::kTableSize);
+
+  HPACKEncoder(const huffman::HuffTree& huffmanTree,
+               bool huffman,
+               uint32_t tableSize=HPACK::kTableSize);
 
   /**
    * Size of a new IOBuf which is added to the chain
+   *
+   * jemalloc will round up to 4k - overhead
    */
-  static const uint32_t kBufferGrowth = 4096;
+  static const uint32_t kBufferGrowth = 4000;
 
   /**
    * Encode the given headers and return the buffer
    */
-  std::unique_ptr<folly::IOBuf> encode(const std::vector<HPACKHeader>& headers,
-                                       uint32_t headroom = 0);
+  virtual std::unique_ptr<folly::IOBuf> encode(
+    const std::vector<HPACKHeader>& headers,
+    uint32_t headroom = 0);
+
+  void setHeaderTableSize(uint32_t size) {
+    table_.setCapacity(size);
+    pendingContextUpdate_ = true;
+  }
+
+ protected:
+  void encodeAsIndex(uint32_t index);
 
  private:
-  void encodeHeader(const HPACKHeader& header);
+  virtual void encodeHeader(const HPACKHeader& header);
 
-  void encodeAsLiteral(const HPACKHeader& header);
-
-  void encodeAsIndex(uint32_t index);
+  virtual void encodeAsLiteral(const HPACKHeader& header);
 
   void addHeader(const HPACKHeader& header);
 
@@ -69,7 +77,9 @@ class HPACKEncoder : public HPACKContext {
   void clearReferenceSet();
 
   bool huffman_;
+ protected:
   HPACKEncodeBuffer buffer_;
+  bool pendingContextUpdate_{false};
 };
 
 }

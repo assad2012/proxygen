@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/Filters.h"
-#include "proxygen/httpserver/RequestHandlerFactory.h"
-
 #include <folly/SocketAddress.h>
+#include <proxygen/httpserver/Filters.h>
+#include <proxygen/httpserver/RequestHandlerFactory.h>
 #include <signal.h>
 
 namespace proxygen {
@@ -81,6 +80,46 @@ class HTTPServerOptions {
    * don't want that.
    */
   bool supportsConnect{false};
-};
 
+  /**
+   * Flow control configuration for the acceptor
+   */
+  size_t initialReceiveWindow{65536};
+  size_t receiveStreamWindowSize{65536};
+  size_t receiveSessionWindowSize{65536};
+
+  /**
+   * Set to true to enable gzip content compression. Currently false for
+   * backwards compatibility.
+   */
+  bool enableContentCompression{false};
+
+  /**
+   * Requests smaller than the specified number of bytes will not be compressed
+   */
+  uint64_t contentCompressionMinimumSize{1000};
+
+  /**
+   * Zlib compression level, valid values are -1(Default) to 9(Slower).
+   * 4 or 6 are a good balance between compression level and cpu usage.
+   */
+  int contentCompressionLevel{-1};
+
+  /**
+   * Content types to compress, all entries as lowercase
+   */
+  std::set<std::string> contentCompressionTypes = {
+    "application/javascript",
+    "application/json",
+    "application/x-javascript",
+    "application/xhtml+xml",
+    "application/xml",
+    "application/xml+rss",
+    "text/css",
+    "text/html",
+    "text/javascript",
+    "text/plain",
+    "text/xml",
+  };
+};
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,18 +7,17 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/SPDYConstants.h"
-#include "proxygen/lib/http/codec/test/MockHTTPCodec.h"
-#include "proxygen/lib/http/codec/test/TestUtils.h"
-#include "proxygen/lib/http/session/test/HTTPSessionMocks.h"
-#include "proxygen/lib/http/session/test/HTTPTransactionMocks.h"
-#include "proxygen/lib/test/TestAsyncTransport.h"
-
 #include <folly/io/async/EventBase.h>
-#include <thrift/lib/cpp/test/MockTAsyncTransport.h>
+#include <proxygen/lib/http/codec/SPDYConstants.h>
+#include <proxygen/lib/http/codec/test/MockHTTPCodec.h>
+#include <proxygen/lib/http/codec/test/TestUtils.h>
+#include <proxygen/lib/http/session/test/HTTPSessionMocks.h>
+#include <proxygen/lib/http/session/test/HTTPTransactionMocks.h>
+#include <proxygen/lib/test/TestAsyncTransport.h>
+#include <folly/io/async/test/MockAsyncTransport.h>
 
-using namespace apache::thrift::async;
-using namespace apache::thrift::transport;
+
+
 using namespace proxygen;
 using namespace testing;
 
@@ -32,9 +31,12 @@ class DownstreamTransactionTest : public testing::Test {
  public:
   DownstreamTransactionTest() {}
 
-  void setupRequestResponseFlow(HTTPTransaction* txn, uint32_t size) {
+  void SetUp() override {
     EXPECT_CALL(transport_, describe(_))
       .WillRepeatedly(Return());
+  }
+
+  void setupRequestResponseFlow(HTTPTransaction* txn, uint32_t size) {
     EXPECT_CALL(handler_, setTransaction(txn));
     EXPECT_CALL(handler_, detachTransaction());
     EXPECT_CALL(transport_, detach(txn));
@@ -45,8 +47,8 @@ class DownstreamTransactionTest : public testing::Test {
             txn->sendBody(makeBuf(size));
             txn->sendEOM();
           }));
-    EXPECT_CALL(transport_, sendHeaders(txn, _, _))
-      .WillOnce(Invoke([=](Unused, const HTTPMessage& headers, Unused) {
+    EXPECT_CALL(transport_, sendHeaders(txn, _, _, _))
+      .WillOnce(Invoke([=](Unused, const HTTPMessage& headers, Unused, Unused) {
             EXPECT_EQ(headers.getStatusCode(), 200);
           }));
     EXPECT_CALL(transport_, sendBody(txn, _, false))
@@ -59,7 +61,7 @@ class DownstreamTransactionTest : public testing::Test {
     EXPECT_CALL(transport_, sendEOM(txn))
       .WillOnce(InvokeWithoutArgs([=]() {
             CHECK_EQ(sent_, size);
-            txn->onIngressBody(makeBuf(size));
+            txn->onIngressBody(makeBuf(size), 0);
             txn->onIngressEOM();
             return 5;
           }));
@@ -73,7 +75,7 @@ class DownstreamTransactionTest : public testing::Test {
           }));
     EXPECT_CALL(transport_, notifyPendingEgress())
       .WillOnce(InvokeWithoutArgs([=] {
-            txn->onWriteReady(size);
+            txn->onWriteReady(size, 1);
           }))
       .WillOnce(DoDefault()); // The second call is for sending the eom
 
@@ -82,11 +84,15 @@ class DownstreamTransactionTest : public testing::Test {
 
  protected:
   folly::EventBase eventBase_;
-  TAsyncTimeoutSet::UniquePtr transactionTimeouts_{
-    new TAsyncTimeoutSet(&eventBase_, std::chrono::milliseconds(500))};
+  folly::HHWheelTimer::UniquePtr transactionTimeouts_{
+    new folly::HHWheelTimer(&eventBase_,
+                            std::chrono::milliseconds(
+                              folly::HHWheelTimer::DEFAULT_TICK_INTERVAL),
+                            folly::AsyncTimeout::InternalEnum::NORMAL,
+                            std::chrono::milliseconds(500))};
   MockHTTPTransactionTransport transport_;
   StrictMock<MockHTTPHandler> handler_;
-  HTTPTransaction::PriorityQueue txnEgressQueue_;
+  HTTP2PriorityQueue txnEgressQueue_;
   uint32_t received_{0};
   uint32_t sent_{0};
 };
@@ -97,13 +103,13 @@ class DownstreamTransactionTest : public testing::Test {
   */
 TEST_F(DownstreamTransactionTest, simple_callback_forwarding) {
   // flow control is disabled
-  auto txn = new HTTPTransaction(
+  HTTPTransaction txn(
     TransportDirection::DOWNSTREAM,
     HTTPCodec::StreamID(1), 1, transport_,
-    txnEgressQueue_, transactionTimeouts_.get());
-  setupRequestResponseFlow(txn, 100);
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()));
+  setupRequestResponseFlow(&txn, 100);
 
-  txn->onIngressHeadersComplete(makeGetRequest());
+  txn.onIngressHeadersComplete(makeGetRequest());
   eventBase_.loop();
 }
 
@@ -111,22 +117,22 @@ TEST_F(DownstreamTransactionTest, simple_callback_forwarding) {
  * Testing that we're sending a window update for simple requests
  */
 TEST_F(DownstreamTransactionTest, regular_window_update) {
-  auto txn = new HTTPTransaction(
+  HTTPTransaction txn(
     TransportDirection::DOWNSTREAM,
     HTTPCodec::StreamID(1), 1, transport_,
-    txnEgressQueue_, transactionTimeouts_.get(),
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()),
     nullptr,
     true, // flow control enabled
     400,
     spdy::kInitialWindow);
   uint32_t reqBodySize = 220;
-  setupRequestResponseFlow(txn, reqBodySize);
+  setupRequestResponseFlow(&txn, reqBodySize);
 
   // test that the window update is generated
   EXPECT_CALL(transport_, sendWindowUpdate(_, reqBodySize));
 
   // run the test
-  txn->onIngressHeadersComplete(makeGetRequest());
+  txn.onIngressHeadersComplete(makeGetRequest());
   eventBase_.loop();
 }
 
@@ -136,28 +142,28 @@ TEST_F(DownstreamTransactionTest, regular_window_update) {
  */
 TEST_F(DownstreamTransactionTest, window_increase) {
   // set initial window size higher than per-stream window
-  auto txn = new HTTPTransaction(
+  HTTPTransaction txn(
     TransportDirection::DOWNSTREAM,
     HTTPCodec::StreamID(1), 1, transport_,
-    txnEgressQueue_, transactionTimeouts_.get(),
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()),
     nullptr,
     true, // flow control enabled
     spdy::kInitialWindow,
     spdy::kInitialWindow);
   uint32_t reqSize = 500;
-  setupRequestResponseFlow(txn, reqSize);
-
-  // use a higher window
-  uint32_t perStreamWindow = spdy::kInitialWindow + 1024 * 1024;
-  txn->setReceiveWindow(perStreamWindow);
+  setupRequestResponseFlow(&txn, reqSize);
 
   // we expect the difference from the per stream window and the initial window,
   // together with the bytes sent in the request
+  uint32_t perStreamWindow = spdy::kInitialWindow + 1024 * 1024;
   uint32_t expectedWindowUpdate =
-    perStreamWindow - spdy::kInitialWindow + reqSize;
+    perStreamWindow - spdy::kInitialWindow;
   EXPECT_CALL(transport_, sendWindowUpdate(_, expectedWindowUpdate));
 
-  txn->onIngressHeadersComplete(makeGetRequest());
+  // use a higher window
+  txn.setReceiveWindow(perStreamWindow);
+
+  txn.onIngressHeadersComplete(makeGetRequest());
   eventBase_.loop();
 }
 
@@ -167,15 +173,15 @@ TEST_F(DownstreamTransactionTest, window_increase) {
  */
 TEST_F(DownstreamTransactionTest, window_decrease) {
   // set initial window size higher than per-stream window
-  auto txn = new HTTPTransaction(
+  HTTPTransaction txn(
     TransportDirection::DOWNSTREAM,
     HTTPCodec::StreamID(1), 1, transport_,
-    txnEgressQueue_, transactionTimeouts_.get(),
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()),
     nullptr,
     true, // flow control enabled
     spdy::kInitialWindow,
     spdy::kInitialWindow);
-  setupRequestResponseFlow(txn, 500);
+  setupRequestResponseFlow(&txn, 500);
 
   // in this case, there should be no window update, as we decrease the window
   // below the number of bytes we're sending
@@ -183,9 +189,9 @@ TEST_F(DownstreamTransactionTest, window_decrease) {
 
   // use a smaller window
   uint32_t perStreamWindow = spdy::kInitialWindow - 1000;
-  txn->setReceiveWindow(perStreamWindow);
+  txn.setReceiveWindow(perStreamWindow);
 
-  txn->onIngressHeadersComplete(makeGetRequest());
+  txn.onIngressHeadersComplete(makeGetRequest());
   eventBase_.loop();
 }
 
@@ -194,33 +200,159 @@ TEST_F(DownstreamTransactionTest, parse_error_cbs) {
   // callback. This is possible because codecs are stateless between
   // frames.
 
-  auto txn = new HTTPTransaction(
+  HTTPTransaction txn(
     TransportDirection::DOWNSTREAM,
     HTTPCodec::StreamID(1), 1, transport_,
-    txnEgressQueue_, transactionTimeouts_.get());
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()));
 
-  HTTPException err(HTTPException::Direction::INGRESS);
+  HTTPException err(HTTPException::Direction::INGRESS, "test");
   err.setHttpStatusCode(400);
 
   InSequence dummy;
 
-  EXPECT_CALL(handler_, setTransaction(txn));
+  EXPECT_CALL(handler_, setTransaction(&txn));
   EXPECT_CALL(handler_, onError(_))
     .WillOnce(Invoke([] (const HTTPException& ex) {
           ASSERT_EQ(ex.getDirection(), HTTPException::Direction::INGRESS);
+          ASSERT_EQ(std::string(ex.what()), "test");
         }));
   // onBody() is suppressed since ingress is complete after ingress onError()
   // onEOM() is suppressed since ingress is complete after ingress onError()
   EXPECT_CALL(transport_, sendAbort(_, _));
   EXPECT_CALL(handler_, detachTransaction());
-  EXPECT_CALL(transport_, detach(txn));
+  EXPECT_CALL(transport_, detach(&txn));
 
-  txn->setHandler(&handler_);
-  txn->onError(err);
+  txn.setHandler(&handler_);
+  txn.onError(err);
   // Since the transaction is already closed for ingress, giving it
   // ingress body causes the transaction to be aborted and closed
   // immediately.
-  txn->onIngressBody(makeBuf(10));
+  txn.onIngressBody(makeBuf(10), 0);
 
   eventBase_.loop();
+}
+
+TEST_F(DownstreamTransactionTest, detach_from_notify) {
+  unique_ptr<StrictMock<MockHTTPHandler>> handler(
+    new StrictMock<MockHTTPHandler>);
+
+  HTTPTransaction txn(
+    TransportDirection::DOWNSTREAM,
+    HTTPCodec::StreamID(1), 1, transport_,
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()));
+
+  InSequence dummy;
+
+  EXPECT_CALL(*handler, setTransaction(&txn));
+  EXPECT_CALL(*handler, onHeadersComplete(_))
+    .WillOnce(Invoke([&](std::shared_ptr<HTTPMessage> msg) {
+          auto response = makeResponse(200);
+          txn.sendHeaders(*response.get());
+          txn.sendBody(makeBuf(10));
+        }));
+  EXPECT_CALL(transport_, sendHeaders(&txn, _, _, _))
+    .WillOnce(Invoke([&](Unused, const HTTPMessage& headers, Unused, Unused) {
+          EXPECT_EQ(headers.getStatusCode(), 200);
+        }));
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(10));
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(-10))
+    .WillOnce(InvokeWithoutArgs([&] () {
+          txn.setHandler(nullptr);
+          handler.reset();
+        }));
+  EXPECT_CALL(transport_, detach(&txn));
+
+  HTTPException err(HTTPException::Direction::INGRESS_AND_EGRESS, "test");
+
+  txn.setHandler(handler.get());
+  txn.onIngressHeadersComplete(makeGetRequest());
+  txn.onError(err);
+}
+
+TEST_F(DownstreamTransactionTest, deferred_egress) {
+  EXPECT_CALL(transport_, describe(_))
+    .WillRepeatedly(Return());
+  EXPECT_CALL(transport_, notifyPendingEgress())
+    .WillRepeatedly(Return());
+
+  HTTPTransaction txn(
+    TransportDirection::DOWNSTREAM,
+    HTTPCodec::StreamID(1), 1, transport_,
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()),
+    nullptr, true, 10, 10);
+
+  InSequence dummy;
+
+  EXPECT_CALL(handler_, setTransaction(&txn));
+  EXPECT_CALL(handler_, onHeadersComplete(_))
+    .WillOnce(Invoke([&](std::shared_ptr<HTTPMessage> msg) {
+          auto response = makeResponse(200);
+          txn.sendHeaders(*response.get());
+          txn.sendBody(makeBuf(10));
+          txn.sendBody(makeBuf(20));
+        }));
+  EXPECT_CALL(transport_, sendHeaders(&txn, _, _, _))
+    .WillOnce(Invoke([&](Unused, const HTTPMessage& headers, Unused, Unused) {
+          EXPECT_EQ(headers.getStatusCode(), 200);
+        }));
+
+  // when enqueued
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(10));
+  EXPECT_CALL(handler_, onEgressPaused());
+  // sendBody
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(20));
+
+  txn.setHandler(&handler_);
+  txn.onIngressHeadersComplete(makeGetRequest());
+
+  // onWriteReady, send, then dequeue (SPDY window now full)
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(-20));
+
+  EXPECT_EQ(txn.onWriteReady(20, 1), false);
+
+  // enqueued after window update
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(20));
+
+  txn.onIngressWindowUpdate(20);
+
+  // Buffer released on error
+  EXPECT_CALL(transport_, notifyEgressBodyBuffered(-20));
+  EXPECT_CALL(handler_, onError(_));
+  EXPECT_CALL(handler_, detachTransaction());
+  EXPECT_CALL(transport_, detach(&txn));
+
+  HTTPException err(HTTPException::Direction::INGRESS_AND_EGRESS, "test");
+  txn.onError(err);
+}
+
+TEST_F(DownstreamTransactionTest, internal_error) {
+  unique_ptr<StrictMock<MockHTTPHandler>> handler(
+    new StrictMock<MockHTTPHandler>);
+
+  HTTPTransaction txn(
+    TransportDirection::DOWNSTREAM,
+    HTTPCodec::StreamID(1), 1, transport_,
+    txnEgressQueue_, WheelTimerInstance(transactionTimeouts_.get()));
+
+  InSequence dummy;
+
+  EXPECT_CALL(*handler, setTransaction(&txn));
+  EXPECT_CALL(*handler, onHeadersComplete(_))
+    .WillOnce(Invoke([&](std::shared_ptr<HTTPMessage> msg) {
+          auto response = makeResponse(200);
+          txn.sendHeaders(*response.get());
+        }));
+  EXPECT_CALL(transport_, sendHeaders(&txn, _, _, _))
+    .WillOnce(Invoke([&](Unused, const HTTPMessage& headers, Unused, Unused) {
+          EXPECT_EQ(headers.getStatusCode(), 200);
+        }));
+  EXPECT_CALL(transport_, sendAbort(&txn, ErrorCode::INTERNAL_ERROR));
+  EXPECT_CALL(*handler, detachTransaction());
+  EXPECT_CALL(transport_, detach(&txn));
+
+  HTTPException err(HTTPException::Direction::INGRESS_AND_EGRESS, "test");
+
+  txn.setHandler(handler.get());
+  txn.onIngressHeadersComplete(makeGetRequest());
+  txn.sendAbort();
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,32 +7,25 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
+#include <wangle/acceptor/Acceptor.h>
 #include <folly/io/async/EventBase.h>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
-#include <proxygen/lib/services/Acceptor.h>
 
-using namespace apache::thrift::async;
 using namespace folly;
-using namespace proxygen;
+using namespace wangle;
 
-class TestConnection : public folly::wangle::ManagedConnection {
+class TestConnection : public wangle::ManagedConnection {
  public:
-  void timeoutExpired() noexcept {
+  void timeoutExpired() noexcept override {}
+  void describe(std::ostream& os) const override {}
+  bool isBusy() const override { return false; }
+  void notifyPendingShutdown() override {}
+  void closeWhenIdle() override {}
+  void dropConnection() override {
+    delete this;
   }
-  void describe(std::ostream& os) const {
-  }
-  bool isBusy() const {
-    return false;
-  }
-  void notifyPendingShutdown() {
-  }
-  void closeWhenIdle() {
-  }
-  void dropConnection() {
-  }
-  void dumpConnectionState(uint8_t loglevel) {
-  }
+  void dumpConnectionState(uint8_t loglevel) override {}
 };
 
 class TestAcceptor : public Acceptor {
@@ -40,11 +33,11 @@ class TestAcceptor : public Acceptor {
   explicit TestAcceptor(const ServerSocketConfig& accConfig)
       : Acceptor(accConfig) {}
 
-  virtual void onNewConnection(
-      apache::thrift::async::TAsyncSocket::UniquePtr sock,
-      const folly::SocketAddress* address,
-      const std::string& nextProtocolName,
-      const TransportInfo& tinfo) {
+  void onNewConnection(folly::AsyncTransportWrapper::UniquePtr sock,
+                       const folly::SocketAddress* address,
+                       const std::string& nextProtocolName,
+                       SecureTransportType secureTransportType,
+                       const TransportInfo& tinfo) override {
     addConnection(new TestConnection);
 
     getEventBase()->terminateLoopSoon();
@@ -54,7 +47,7 @@ class TestAcceptor : public Acceptor {
 TEST(AcceptorTest, Basic) {
 
   EventBase base;
-  auto socket = TAsyncServerSocket::newSocket(&base);
+  auto socket = AsyncServerSocket::newSocket(&base);
   ServerSocketConfig config;
 
   TestAcceptor acceptor(config);
@@ -69,7 +62,7 @@ TEST(AcceptorTest, Basic) {
 
   socket->startAccepting();
 
-  auto client_socket = TAsyncSocket::newSocket(
+  auto client_socket = AsyncSocket::newSocket(
     &base, addy);
 
   base.loopForever();

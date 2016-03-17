@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,17 +7,15 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/HTTPMessage.h"
-#include "proxygen/lib/utils/TestUtils.h"
-
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
-#include <iostream>
 #include <libgen.h>
 #include <list>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <proxygen/lib/http/HTTPMessage.h>
+#include <proxygen/lib/utils/TestUtils.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -345,15 +343,15 @@ TEST(HTTPMessage, TestMethod) {
 
   msg.setMethod(HTTPMethod::GET);
   EXPECT_EQ("GET", msg.getMethodString());
-  EXPECT_EQ(HTTPMethod::GET, msg.getMethod());
+  EXPECT_EQ(HTTPMethod::GET == msg.getMethod(), true);
 
   msg.setMethod("FOO");
   EXPECT_EQ("FOO", msg.getMethodString());
-  EXPECT_EQ(boost::none, msg.getMethod());
+  EXPECT_EQ(boost::none == msg.getMethod(), true);
 
   msg.setMethod(HTTPMethod::CONNECT);
   EXPECT_EQ("CONNECT", msg.getMethodString());
-  EXPECT_EQ(HTTPMethod::CONNECT, msg.getMethod());
+  EXPECT_EQ(HTTPMethod::CONNECT == msg.getMethod(), true);
 }
 
 void testPathAndQuery(const string& url,
@@ -460,4 +458,15 @@ TEST(HTTPMessage, SetQueryParamTests) {
                     "b",
                     "localhost:80/foo?param2=b#qqq",
                     "param2=b");
+}
+
+TEST(HTTPMessage, TestCheckForHeaderToken) {
+  HTTPMessage msg;
+  HTTPHeaders& headers = msg.getHeaders();
+
+  headers.add(HTTP_HEADER_CONNECTION, "HTTP2-Settings");
+  EXPECT_TRUE(msg.checkForHeaderToken(HTTP_HEADER_CONNECTION, "HTTP2-Settings",
+                                      false));
+  EXPECT_FALSE(msg.checkForHeaderToken(HTTP_HEADER_CONNECTION, "http2-settings",
+                                       true));
 }

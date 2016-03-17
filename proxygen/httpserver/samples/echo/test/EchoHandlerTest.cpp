@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,12 +7,11 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/httpserver/Mocks.h"
-#include "proxygen/httpserver/samples/echo/EchoHandler.h"
-#include "proxygen/httpserver/samples/echo/EchoStats.h"
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <proxygen/httpserver/Mocks.h>
+#include <proxygen/httpserver/samples/echo/EchoHandler.h>
+#include <proxygen/httpserver/samples/echo/EchoStats.h>
 
 using namespace EchoService;
 using namespace proxygen;
@@ -26,13 +25,13 @@ class MockEchoStats : public EchoStats {
 
 class EchoHandlerFixture : public testing::Test {
  public:
-  void SetUp() {
+  void SetUp() override {
     handler = new EchoHandler(&stats);
     responseHandler = folly::make_unique<MockResponseHandler>(handler);
     handler->setResponseHandler(responseHandler.get());
   }
 
-  void TearDown() {
+  void TearDown() override {
     Mock::VerifyAndClear(&stats);
     Mock::VerifyAndClear(responseHandler.get());
 

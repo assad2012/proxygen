@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,11 +9,12 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/session/HTTPTransaction.h"
+#include <proxygen/lib/http/session/HTTPTransaction.h>
 
 namespace proxygen {
 
 class RequestHandler;
+class PushHandler;
 
 /**
  * Interface that acts as client for RequestHandler. It also has a hook
@@ -72,10 +73,13 @@ class ResponseHandler {
 
   virtual void resumeIngress() noexcept = 0;
 
-  // Accessors for Transport/Connection information
-  virtual const TransportInfo& getSetupTransportInfo() const noexcept = 0;
+  virtual ResponseHandler* newPushedResponse(
+    PushHandler* pushHandler) noexcept = 0;
 
-  virtual void getCurrentTransportInfo(TransportInfo* tinfo) const = 0;
+  // Accessors for Transport/Connection information
+  virtual const wangle::TransportInfo& getSetupTransportInfo() const noexcept = 0;
+
+  virtual void getCurrentTransportInfo(wangle::TransportInfo* tinfo) const = 0;
 
  protected:
   RequestHandler* upstream_{nullptr};

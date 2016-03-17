@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,14 +7,12 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/utils/HTTPTime.h"
-
 #include <gtest/gtest.h>
+#include <proxygen/lib/utils/HTTPTime.h>
 
 using proxygen::parseHTTPDateTime;
 
 TEST(HTTPTimeTests, InvalidTimeTest) {
-  uint64_t a;
   EXPECT_FALSE(parseHTTPDateTime("Hello, World").hasValue());
   EXPECT_FALSE(parseHTTPDateTime("Sun, 33 Nov 1994 08:49:37 GMT").hasValue());
   EXPECT_FALSE(parseHTTPDateTime("Sun, 06 Nov 1800").hasValue());

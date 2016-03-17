@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,15 +9,14 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/HTTPException.h"
-#include "proxygen/lib/http/HTTPHeaderSize.h"
-#include "proxygen/lib/http/codec/CodecProtocol.h"
-#include "proxygen/lib/http/codec/ErrorCode.h"
-#include "proxygen/lib/http/codec/HTTPSettings.h"
-#include "proxygen/lib/http/codec/TransportDirection.h"
-#include "proxygen/lib/http/codec/compress/HeaderCodec.h"
-
 #include <folly/io/IOBufQueue.h>
+#include <proxygen/lib/http/HTTPException.h>
+#include <proxygen/lib/http/HTTPHeaderSize.h>
+#include <proxygen/lib/http/codec/CodecProtocol.h>
+#include <proxygen/lib/http/codec/ErrorCode.h>
+#include <proxygen/lib/http/codec/HTTPSettings.h>
+#include <proxygen/lib/http/codec/TransportDirection.h>
+#include <proxygen/lib/http/codec/compress/HeaderCodec.h>
 
 namespace proxygen {
 
@@ -48,6 +47,17 @@ class HTTPCodec {
   typedef uint32_t StreamID;
 
   static const StreamID NoStream{0};
+
+  static const boost::none_t NoPadding;
+
+  static const StreamID MAX_STREAM_ID = 1 << 31;
+
+  class PriorityQueue {
+   public:
+    virtual ~PriorityQueue() {}
+
+    virtual void addPriorityNode(StreamID id, StreamID parent) = 0;
+  };
 
   /**
    * Callback interface that users of HTTPCodec must implement
@@ -88,9 +98,11 @@ class HTTPCodec {
      * @param chain   One or more buffers of body data. The codec will
      *                remove any protocol framing, such as HTTP/1.1 chunk
      *                headers, from the buffers before calling this function.
+     * @param padding Number of pad bytes that came with the data segment
      */
     virtual void onBody(StreamID stream,
-                        std::unique_ptr<folly::IOBuf> chain) = 0;
+                        std::unique_ptr<folly::IOBuf> chain,
+                        uint16_t padding) = 0;
 
     /**
      * Called for each HTTP chunk header.
@@ -155,13 +167,28 @@ class HTTPCodec {
                          ErrorCode code) {}
 
     /**
+     * Called upon receipt of a frame header.
+     * @param stream_id The stream ID
+     * @param flags     The flags field of frame header
+     * @param length    The length field of frame header
+     * @param version   The version of frame (SPDY only)
+     * @note Not all protocols have frames. SPDY does, but HTTP/1.1 doesn't.
+     */
+    virtual void onFrameHeader(uint32_t stream_id,
+                               uint8_t flags,
+                               uint32_t length,
+                               uint16_t version = 0) {}
+
+    /**
      * Called upon receipt of a goaway.
      * @param lastGoodStreamID  Last successful stream created by the receiver
      * @param code              The code the connection was aborted with
+     * @param debugData         The additional debug data for diagnostic purpose
      * @note Not all protocols have goaways. SPDY does, but HTTP/1.1 doesn't.
      */
     virtual void onGoaway(uint64_t lastGoodStreamID,
-                          ErrorCode code) {}
+                          ErrorCode code,
+                          std::unique_ptr<folly::IOBuf> debugData = nullptr) {}
 
     /**
      * Called upon receipt of a ping request
@@ -196,6 +223,24 @@ class HTTPCodec {
      * protocols that support settings ack.
      */
     virtual void onSettingsAck() {}
+
+    /**
+     * Called upon receipt of a priority frame, for protocols that support
+     * dynamic priority
+     */
+    virtual void onPriority(StreamID stream,
+                            const HTTPMessage::HTTPPriority& pri) {}
+
+    /**
+     * Called upon receipt of a valid protocol switch.  Return false if
+     * protocol switch could not be completed.
+     */
+    virtual bool onNativeProtocolUpgrade(StreamID stream,
+                                         CodecProtocol protocol,
+                                         const std::string& protocolString,
+                                         HTTPMessage& msg) {
+      return false;
+    }
 
     /**
      * Return the number of open streams started by this codec callback.
@@ -280,6 +325,14 @@ class HTTPCodec {
   virtual void onIngressEOF() = 0;
 
   /**
+   * Invoked on a codec that has been upgraded to via an HTTPMessage on
+   * a different codec.  The codec may return false to halt the upgrade.
+   */
+  virtual bool onIngressUpgradeMessage(const HTTPMessage& msg) {
+    return true;
+  }
+
+  /**
    * Check whether the codec can process new streams. Typically,
    * an implementing subclass will return true when a new codec is
    * created and false once it encounters a situation that would
@@ -320,6 +373,15 @@ class HTTPCodec {
   virtual bool supportsPushTransactions() const = 0;
 
   /**
+   * Generate a connection preface, if there is any for this protocol.
+   *
+   * @return size of the generated message
+   */
+  virtual size_t generateConnectionPreface(folly::IOBufQueue& writeBuf) {
+    return 0;
+  }
+
+  /**
    * Write an egress message header.  For pushed streams, you must specify
    * the assocStream.
    * @retval size the size of the generated message, both the actual size
@@ -330,6 +392,7 @@ class HTTPCodec {
                               StreamID stream,
                               const HTTPMessage& msg,
                               StreamID assocStream = NoStream,
+                              bool eom = false,
                               HTTPHeaderSize* size = nullptr) = 0;
 
   /**
@@ -339,6 +402,7 @@ class HTTPCodec {
    * if necessary (e.g. you haven't manually sent a chunk header and the
    * message should be chunked).
    *
+   * @param padding Optionally add padding bytes to the body if possible
    * @param eom implicitly generate the EOM marker with this body frame
    *
    * @return number of bytes written
@@ -346,6 +410,7 @@ class HTTPCodec {
   virtual size_t generateBody(folly::IOBufQueue& writeBuf,
                               StreamID stream,
                               std::unique_ptr<folly::IOBuf> chain,
+                              boost::optional<uint8_t> padding,
                               bool eom) = 0;
 
   /**
@@ -390,9 +455,11 @@ class HTTPCodec {
    * Generate any protocol framing needed to abort a stream.
    * @return number of bytes written
    */
-  virtual size_t generateGoaway(folly::IOBufQueue& writeBuf,
-                                StreamID lastStream,
-                                ErrorCode code) = 0;
+  virtual size_t generateGoaway(
+    folly::IOBufQueue& writeBuf,
+    StreamID lastStream,
+    ErrorCode code,
+    std::unique_ptr<folly::IOBuf> debugData = nullptr) = 0;
 
   /**
    * If the protocol supports it, generate a ping message that the other
@@ -436,6 +503,14 @@ class HTTPCodec {
   }
 
   /*
+   * Generate a PRIORITY message, if supported
+   */
+  virtual size_t generatePriority(folly::IOBufQueue& writeBuf,
+                                  StreamID stream,
+                                  const HTTPMessage::HTTPPriority& pri) {
+    return 0;
+  }
+  /*
    * The below interfaces need only be implemented if the codec supports
    * settings
    */
@@ -463,6 +538,42 @@ class HTTPCodec {
    * Get the identifier of the last stream started by the remote.
    */
   virtual StreamID getLastIncomingStreamID() const { return NoStream; }
+
+  /**
+   * Get the default size of flow control windows for this protocol
+   */
+  virtual uint32_t getDefaultWindowSize() const { return 0; }
+
+  /**
+   * Create virtual nodes in HTTP/2 priority tree. Some protocols (SPDY) have a
+   * linear priority structure which must be simulated in the HTTP/2 tree
+   * structure with "virtual" nodes representing different priority bands.
+   * There are other cases we simply want a "plain" linear priority structure
+   * even with HTTP/2. In that case a Priority frame will also be sent out for
+   * each virtual node created so that peer will have the same linear structure.
+   *
+   * @param queue     the priority queue to add nodes
+   * @param writeBuf  IOBufQueue to append priority frames to send. For SPDY,
+   *                    the writeBuf will be ignored.
+   * @param maxLavel  the max level of virtual priority nodes to create. For
+   *                    SPDY, this value will be ignored.
+   */
+  virtual size_t addPriorityNodes(
+      PriorityQueue& queue,
+      folly::IOBufQueue& writeBuf,
+      uint8_t maxLevel) {
+    return 0;
+  }
+
+  /**
+   * Map the given linear priority to the correct parent node dependency
+   */
+  virtual StreamID mapPriorityToDependency(uint8_t priority) const { return 0; }
+
+  /**
+   * Map the parent back to the priority, -1 if this doesn't make sense.
+   */
+  virtual int8_t mapDependencyToPriority(StreamID parent) const { return -1; }
 };
 
 }

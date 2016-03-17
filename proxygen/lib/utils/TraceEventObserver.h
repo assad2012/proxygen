@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,7 +9,7 @@
  */
 #pragma once
 
-#include "proxygen/lib/utils/TraceEvent.h"
+#include <proxygen/lib/utils/TraceEvent.h>
 
 namespace proxygen {
 
@@ -19,6 +19,7 @@ namespace proxygen {
 struct TraceEventObserver {
   virtual ~TraceEventObserver() {}
   virtual void traceEventAvailable(TraceEvent event) noexcept {}
+  virtual void emitTraceEvents(std::vector<TraceEvent>) noexcept {}
 };
 
 }

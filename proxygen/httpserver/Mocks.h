@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/RequestHandler.h"
-#include "proxygen/httpserver/ResponseHandler.h"
-
 #include <gmock/gmock.h>
+#include <proxygen/httpserver/RequestHandler.h>
+#include <proxygen/httpserver/ResponseHandler.h>
 
 namespace proxygen {
 
@@ -22,22 +21,33 @@ namespace proxygen {
 
 class MockResponseHandler : public ResponseHandler {
  public:
-  explicit MockResponseHandler(RequestHandler* h): ResponseHandler(h) {
-  }
+  explicit MockResponseHandler(RequestHandler* h) : ResponseHandler(h) {}
+#ifdef __clang__
+# pragma clang diagnostic push
+# if __clang_major__ > 3 || __clang_minor__ >= 6
+#  pragma clang diagnostic ignored "-Winconsistent-missing-override"
+# endif
+#endif
+  GMOCK_METHOD1_(, noexcept, , sendHeaders, void(HTTPMessage&));
+  GMOCK_METHOD1_(, noexcept, , sendChunkHeader, void(size_t));
+  GMOCK_METHOD1_(, noexcept, , sendBody, void(std::shared_ptr<folly::IOBuf>));
+  GMOCK_METHOD0_(, noexcept, , sendChunkTerminator, void());
+  GMOCK_METHOD0_(, noexcept, , sendEOM, void());
+  GMOCK_METHOD0_(, noexcept, , sendAbort, void());
+  GMOCK_METHOD0_(, noexcept, , refreshTimeout, void());
+  GMOCK_METHOD0_(, noexcept, , pauseIngress, void());
+  GMOCK_METHOD0_(, noexcept, , resumeIngress, void());
+  GMOCK_METHOD1_(, noexcept, , newPushedResponse,
+                 ResponseHandler*(PushHandler*));
 
-  GMOCK_METHOD1_(, noexcept,, sendHeaders, void(HTTPMessage&));
-  GMOCK_METHOD1_(, noexcept,, sendChunkHeader, void(size_t));
-  GMOCK_METHOD1_(, noexcept,, sendBody, void(std::shared_ptr<folly::IOBuf>));
-  GMOCK_METHOD0_(, noexcept,, sendChunkTerminator, void());
-  GMOCK_METHOD0_(, noexcept,, sendEOM, void());
-  GMOCK_METHOD0_(, noexcept,, sendAbort, void());
-  GMOCK_METHOD0_(, noexcept,, refreshTimeout, void());
-  GMOCK_METHOD0_(, noexcept,, pauseIngress, void());
-  GMOCK_METHOD0_(, noexcept,, resumeIngress, void());
-  const TransportInfo& getSetupTransportInfo() const noexcept {
+  MOCK_CONST_METHOD1(getCurrentTransportInfo, void(wangle::TransportInfo*));
+#ifdef __clang__
+# pragma clang diagnostic pop
+#endif
+
+  const wangle::TransportInfo& getSetupTransportInfo() const noexcept override {
     return transportInfo;
   }
-  MOCK_CONST_METHOD1(getCurrentTransportInfo, void(TransportInfo*));
 
   void sendBody(std::unique_ptr<folly::IOBuf> body) noexcept override {
     if (body) {
@@ -47,20 +57,29 @@ class MockResponseHandler : public ResponseHandler {
     }
   }
 
-  TransportInfo transportInfo;
+  wangle::TransportInfo transportInfo;
 };
 
 class MockRequestHandler : public RequestHandler {
  public:
-  GMOCK_METHOD1_(, noexcept,, setResponseHandler, void(ResponseHandler*));
-  GMOCK_METHOD1_(, noexcept,, onRequest, void(std::shared_ptr<HTTPMessage>));
-  GMOCK_METHOD1_(, noexcept,, onBody, void(std::shared_ptr<folly::IOBuf>));
-  GMOCK_METHOD1_(, noexcept,, onUpgrade, void(UpgradeProtocol));
-  GMOCK_METHOD0_(, noexcept,, onEOM, void());
-  GMOCK_METHOD0_(, noexcept,, requestComplete, void());
-  GMOCK_METHOD1_(, noexcept,, onError, void(ProxygenError));
-  GMOCK_METHOD0_(, noexcept,, onEgressPaused, void());
-  GMOCK_METHOD0_(, noexcept,, onEgressResumed, void());
+#ifdef __clang__
+# pragma clang diagnostic push
+# if __clang_major__ > 3 || __clang_minor__ >= 6
+#  pragma clang diagnostic ignored "-Winconsistent-missing-override"
+# endif
+#endif
+  GMOCK_METHOD1_(, noexcept, , setResponseHandler, void(ResponseHandler*));
+  GMOCK_METHOD1_(, noexcept, , onRequest, void(std::shared_ptr<HTTPMessage>));
+  GMOCK_METHOD1_(, noexcept, , onBody, void(std::shared_ptr<folly::IOBuf>));
+  GMOCK_METHOD1_(, noexcept, , onUpgrade, void(UpgradeProtocol));
+  GMOCK_METHOD0_(, noexcept, , onEOM, void());
+  GMOCK_METHOD0_(, noexcept, , requestComplete, void());
+  GMOCK_METHOD1_(, noexcept, , onError, void(ProxygenError));
+  GMOCK_METHOD0_(, noexcept, , onEgressPaused, void());
+  GMOCK_METHOD0_(, noexcept, , onEgressResumed, void());
+#ifdef __clang__
+# pragma clang diagnostic pop
+#endif
 
   void onRequest(std::unique_ptr<HTTPMessage> headers) noexcept override {
     onRequest(std::shared_ptr<HTTPMessage>(headers.release()));

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -11,8 +11,9 @@
 
 #include <folly/FBVector.h>
 #include <folly/Range.h>
-#include "proxygen/lib/http/HTTPCommonHeaders.h"
-#include "proxygen/lib/utils/UtilInl.h"
+#include <proxygen/lib/http/HTTPCommonHeaders.h>
+#include <proxygen/lib/utils/Export.h>
+#include <proxygen/lib/utils/UtilInl.h>
 
 #include <bitset>
 #include <cstring>
@@ -69,14 +70,14 @@ class HTTPHeaders {
    * separator used to concatenate multiple values of the same header
    * check out sections 4.2 and 14.45 from rfc2616
    */
-  const std::string COMBINE_SEPARATOR = ", ";
+  static const std::string COMBINE_SEPARATOR;
 
-  HTTPHeaders();
-  ~HTTPHeaders();
-  HTTPHeaders (const HTTPHeaders&);
-  HTTPHeaders& operator= (const HTTPHeaders&);
-  HTTPHeaders (HTTPHeaders&&) noexcept;
-  HTTPHeaders& operator= (HTTPHeaders&&);
+  FB_EXPORT HTTPHeaders();
+  FB_EXPORT ~HTTPHeaders();
+  FB_EXPORT HTTPHeaders (const HTTPHeaders&);
+  FB_EXPORT HTTPHeaders& operator= (const HTTPHeaders&);
+  FB_EXPORT HTTPHeaders (HTTPHeaders&&) noexcept;
+  FB_EXPORT HTTPHeaders& operator= (HTTPHeaders&&);
 
   /**
    * Add the header 'name' with value 'value'; if other instances of this
@@ -121,7 +122,8 @@ class HTTPHeaders {
    * combine all the value for this header into a string
    */
   template <typename T>
-  std::string combine(const T& header) const;
+  std::string combine(const T& header,
+                      const std::string& separator=COMBINE_SEPARATOR) const;
 
   /**
    * Process the list of all headers, in the order that they were seen:
@@ -298,7 +300,7 @@ void HTTPHeaders::add(HTTPHeaderCode code, T&& value) {
     ptr = (HTTPHeaderCode*) memchr((void*)ptr, (Code), \
                             codes_.size() - (ptr - codes_.data())); \
     if (ptr == nullptr) break; \
-    const int pos = ptr - codes_.data(); \
+    const size_t pos = ptr - codes_.data(); \
     {Block} \
     ptr++; \
   } \
@@ -358,13 +360,14 @@ bool HTTPHeaders::forEachValueOfHeader(HTTPHeaderCode code,
 }
 
 template <typename T>
-std::string HTTPHeaders::combine(const T& header) const {
+std::string HTTPHeaders::combine(const T& header,
+                                 const std::string& separator) const {
   std::string combined = "";
   forEachValueOfHeader(header, [&] (const std::string& value) -> bool {
       if (combined.empty()) {
         combined.append(value);
       } else {
-        combined.append(COMBINE_SEPARATOR).append(value);
+        combined.append(separator).append(value);
       }
       return false;
     });

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,15 +7,14 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKCodec.h"
-#include "proxygen/lib/http/codec/compress/Header.h"
-#include "proxygen/lib/http/codec/compress/HeaderCodec.h"
-
 #include <folly/Range.h>
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <proxygen/lib/http/codec/compress/HPACKCodec.h>
+#include <proxygen/lib/http/codec/compress/Header.h>
+#include <proxygen/lib/http/codec/compress/HeaderCodec.h>
 #include <vector>
 
 using namespace folly::io;
@@ -56,6 +55,11 @@ class TestHeaderCodecStats : public HeaderCodec::Stats {
     errors++;
   }
 
+  void recordDecodeTooLarge(HeaderCodec::Type type) override {
+    EXPECT_EQ(type, HeaderCodec::Type::HPACK);
+    errors++; //?
+  }
+
   void reset() {
     encodes = 0;
     decodes = 0;
@@ -83,7 +87,7 @@ class HPACKCodecTests : public testing::Test {
     for (auto& ha : a) {
       headers.push_back(Header(ha[0], ha[1]));
     }
-    return std::move(headers);
+    return headers;
   }
 
   HPACKCodec client{TransportDirection::UPSTREAM};
@@ -280,4 +284,28 @@ TEST_F(HPACKCodecTests, header_codec_stats) {
   EXPECT_EQ(stats.encodedBytesCompr, 0);
   EXPECT_EQ(stats.encodedBytesUncompr, 0);
   client.setStats(nullptr);
+}
+
+/**
+ * check that we're enforcing the limit on total uncompressed size
+ */
+TEST_F(HPACKCodecTests, uncompressed_size_limit) {
+  vector<vector<string>> headers;
+  // generate lots of small headers
+  string contentLength = "Content-Length";
+  for (int i = 0; i < 10000; i++) {
+    string value = folly::to<string>(i);
+    vector<string> header = {contentLength, value};
+    headers.push_back(header);
+  }
+  vector<Header> req = headersFromArray(headers);
+  unique_ptr<IOBuf> encoded = server.encode(req);
+  Cursor cursor(encoded.get());
+  uint32_t len = 0;
+  if (encoded) {
+    len = encoded->computeChainDataLength();
+  }
+  auto result = client.decode(cursor, len);
+  EXPECT_TRUE(result.isError());
+  EXPECT_EQ(result.error(), HeaderDecodeError::HEADERS_TOO_LARGE);
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,21 +9,23 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKConstants.h"
-#include "proxygen/lib/http/codec/compress/Huffman.h"
-
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBufQueue.h>
+#include <proxygen/lib/http/codec/compress/HPACKConstants.h>
+#include <proxygen/lib/http/codec/compress/Huffman.h>
 
 namespace proxygen {
 
 class HPACKEncodeBuffer {
 
  public:
-  explicit HPACKEncodeBuffer(
+  HPACKEncodeBuffer(
     uint32_t growthSize,
-    HPACK::MessageType msgType = HPACK::MessageType::REQ,
-    bool huffman = false);
+    const huffman::HuffTree& huffmanTree,
+    bool huffmanEnabled);
+
+  explicit HPACKEncodeBuffer(uint32_t growthSize);
+
   ~HPACKEncodeBuffer() {}
 
   /**
@@ -75,7 +77,7 @@ class HPACKEncodeBuffer {
   /**
    * prints the content of an IOBuf in binary format. Useful for debugging.
    */
-  std::string toBin(uint8_t bytesPerLine=8);
+  std::string toBin();
 
  private:
 
@@ -87,8 +89,8 @@ class HPACKEncodeBuffer {
   uint32_t growthSize_;
   folly::IOBufQueue bufQueue_;
   folly::io::QueueAppender buf_;
-  HPACK::MessageType msgType_;
-  bool huffman_;
+  const huffman::HuffTree& huffmanTree_;
+  bool huffmanEnabled_;
 };
 
 }

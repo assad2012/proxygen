@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/lib/services/WorkerThread.h"
-
 #include <cstdint>
 #include <map>
+#include <proxygen/lib/services/WorkerThread.h>
 
 namespace proxygen {
 
@@ -28,6 +27,7 @@ class RequestWorker : public WorkerThread {
   class FinishCallback {
    public:
     virtual ~FinishCallback() noexcept {}
+    virtual void workerStarted(RequestWorker*) = 0;
     virtual void workerFinished(RequestWorker*) = 0;
   };
 
@@ -74,6 +74,7 @@ class RequestWorker : public WorkerThread {
   void flushStats();
 
  private:
+  void setup() override;
   void cleanup() override;
 
   // The next request id within this thread. The id has its highest byte set to

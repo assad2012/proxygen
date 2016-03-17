@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -18,7 +18,8 @@ inline bool caseInsensitiveEqual(folly::StringPiece s, folly::StringPiece t) {
   if (s.size() != t.size()) {
     return false;
   }
-  return std::equal(s.begin(), s.end(), t.begin(), folly::asciiCaseInsensitive);
+  return std::equal(
+      s.begin(), s.end(), t.begin(), folly::AsciiCaseInsensitive());
 }
 
 }

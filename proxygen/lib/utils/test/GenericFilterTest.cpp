@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,13 +7,12 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/utils/FilterChain.h"
-
 #include <deque>
 #include <folly/Memory.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <map>
+#include <proxygen/lib/utils/FilterChain.h>
 #include <stdlib.h>
 
 using namespace folly;
@@ -429,9 +428,7 @@ class TestFilterOddDeleteDo: public TestFilter<false> {
   explicit TestFilterOddDeleteDo(int* deletions):
       TestFilter<false>(true, true),
       deletions_(CHECK_NOTNULL(deletions)) {}
-  ~TestFilterOddDeleteDo() {
-    ++*deletions_;
-  }
+  ~TestFilterOddDeleteDo() override { ++*deletions_; }
 
   void doA() override {
     auto call = call_;
@@ -470,9 +467,7 @@ class TestFilterOddDeleteOn: public TestFilter<Owned> {
  public:
   explicit TestFilterOddDeleteOn(int* deletions):
       deletions_(CHECK_NOTNULL(deletions)) {}
-  ~TestFilterOddDeleteOn() {
-    ++*deletions_;
-  }
+  ~TestFilterOddDeleteOn() override { ++*deletions_; }
 
   void onA() override {
     auto callback = this->callback_;

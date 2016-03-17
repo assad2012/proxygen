@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <folly/Conv.h>
 #include <ostream>
 #include <string>
 
@@ -16,6 +17,7 @@ namespace proxygen {
 
 class HPACKHeader {
   public:
+  static const uint32_t kMinLength = 32;
 
   HPACKHeader() {}
 
@@ -29,7 +31,7 @@ class HPACKHeader {
    * size in bytes of the header entry, as defined in the HPACK spec
    */
   uint32_t bytes() const {
-    return 32 + name.size() + value.size();
+    return folly::to<uint32_t>(kMinLength + name.size() + value.size());
   }
 
   bool operator==(const HPACKHeader& other) const {

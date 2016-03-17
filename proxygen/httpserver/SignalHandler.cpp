@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,11 +7,10 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/httpserver/SignalHandler.h"
-
-#include "proxygen/httpserver/HTTPServer.h"
+#include <proxygen/httpserver/SignalHandler.h>
 
 #include <folly/io/async/EventBaseManager.h>
+#include <proxygen/httpserver/HTTPServer.h>
 #include <signal.h>
 
 using folly::EventBaseManager;
@@ -19,7 +18,7 @@ using folly::EventBaseManager;
 namespace proxygen {
 
 SignalHandler::SignalHandler(HTTPServer* server)
-    : TAsyncSignalHandler(EventBaseManager::get()->getEventBase()),
+    : folly::AsyncSignalHandler(EventBaseManager::get()->getEventBase()),
       server_(server) {
 }
 

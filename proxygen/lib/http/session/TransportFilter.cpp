@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,15 +7,15 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/session/TransportFilter.h"
+#include <proxygen/lib/http/session/TransportFilter.h>
 
-using namespace apache::thrift::async;
-using namespace apache::thrift::transport;
+
+
 using namespace folly;
 
 namespace proxygen {
 
-// TAsyncTransport::ReadCallback methods
+// AsyncTransportWrapper::ReadCallback methods
 void PassThroughTransportFilter::getReadBuffer(void** bufReturn,
                                                size_t* lenReturn) {
   callback_->getReadBuffer(bufReturn, lenReturn);
@@ -30,40 +30,40 @@ void PassThroughTransportFilter::readEOF() noexcept {
   destroy();
 }
 
-void PassThroughTransportFilter::readError(
-    const TTransportException& ex) noexcept {
-  callback_->readError(ex);
+void PassThroughTransportFilter::readErr(
+    const AsyncSocketException& ex) noexcept {
+  callback_->readErr(ex);
   destroy();
 }
 
-// TAsyncTransport methods
+// AsyncTransport methods
 
-void PassThroughTransportFilter::setReadCallback(
-    TAsyncTransport::ReadCallback* callback) {
+void PassThroughTransportFilter::setReadCB(
+    AsyncTransportWrapper::ReadCallback* callback) {
   // Important! The filter must call setCallbackInternal in its base class and
   // it must not forward the call.
   setCallbackInternal(callback);
 }
 
-TAsyncTransport::ReadCallback*
+AsyncTransportWrapper::ReadCallback*
 PassThroughTransportFilter::getReadCallback() const {
   return call_->getReadCallback();
 }
 
 void PassThroughTransportFilter::write(
-    TAsyncTransport::WriteCallback* callback,
+    AsyncTransportWrapper::WriteCallback* callback,
     const void* buf, size_t bytes, WriteFlags flags) {
   call_->write(callback, buf, bytes, flags);
 }
 
 void PassThroughTransportFilter::writev(
-    TAsyncTransport::WriteCallback* callback, const iovec* vec, size_t count,
+    AsyncTransportWrapper::WriteCallback* callback, const iovec* vec, size_t count,
     WriteFlags flags) {
   call_->writev(callback, vec, count, flags);
 }
 
 void PassThroughTransportFilter::writeChain(
-    TAsyncTransport::WriteCallback* callback,
+    AsyncTransportWrapper::WriteCallback* callback,
     std::unique_ptr<folly::IOBuf>&& iob, WriteFlags flags) {
   call_->writeChain(callback, std::move(iob), flags);
 }

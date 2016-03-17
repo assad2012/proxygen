@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,15 +9,14 @@
  */
 #pragma once
 
-#include "proxygen/lib/utils/TraceEventObserver.h"
+#include <proxygen/lib/utils/TraceEventObserver.h>
 
 namespace proxygen {
-
+/*
+ * A no-op trace event observer
+ */
 struct NullTraceEventObserver : public TraceEventObserver {
-  // Do nothing.
-  void traceEventAvailable(TraceEvent event) noexcept override {}
-
-  static NullTraceEventObserver nullObserver;
+  void traceEventAvailable(TraceEvent) noexcept override {}
 };
 
 }

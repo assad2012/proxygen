@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,21 +7,20 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/test/TestAsyncTransport.h"
+#include <proxygen/lib/test/TestAsyncTransport.h>
 
 #include <folly/SocketAddress.h>
 #include <folly/io/IOBuf.h>
 #include <folly/io/async/EventBase.h>
-#include <thrift/lib/cpp/concurrency/Util.h>
-#include <thrift/lib/cpp/transport/TTransportException.h>
+#include <folly/io/async/AsyncSocketException.h>
 
-using apache::thrift::async::TAsyncTimeout;
-using apache::thrift::async::WriteFlags;
-using apache::thrift::concurrency::Util;
-using apache::thrift::transport::TTransportException;
+using folly::WriteFlags;
+using folly::AsyncSocketException;
+using folly::AsyncTimeout;
 using folly::EventBase;
 using folly::IOBuf;
 using folly::SocketAddress;
+using proxygen::TimePoint;
 using std::shared_ptr;
 using std::unique_ptr;
 
@@ -31,12 +30,12 @@ using std::unique_ptr;
 
 class TestAsyncTransport::ReadEvent {
  public:
-  ReadEvent(const void* buf, size_t buflen, int64_t delay)
+  ReadEvent(const void* buf, size_t buflen, std::chrono::milliseconds delay)
     : buffer_(nullptr),
       readStart_(nullptr),
       dataEnd_(nullptr),
       isError_(false),
-      exception_(),
+      exception_(folly::AsyncSocketException::UNKNOWN, ""),
       delay_(delay) {
     if (buflen == 0) {
       // This means EOF
@@ -53,7 +52,7 @@ class TestAsyncTransport::ReadEvent {
     dataEnd_ = buffer_ + buflen;
   }
 
-  ReadEvent(const TTransportException& ex, int64_t delay)
+  ReadEvent(const folly::AsyncSocketException& ex, std::chrono::milliseconds delay)
     : buffer_(nullptr),
       readStart_(nullptr),
       dataEnd_(nullptr),
@@ -65,7 +64,7 @@ class TestAsyncTransport::ReadEvent {
     free(buffer_);
   }
 
-  int64_t getDelay() const {
+  std::chrono::milliseconds getDelay() const {
     return delay_;
   }
 
@@ -90,7 +89,7 @@ class TestAsyncTransport::ReadEvent {
     return isError_;
   }
 
-  const TTransportException& getException() const {
+  const folly::AsyncSocketException& getException() const {
     return exception_;
   }
 
@@ -100,16 +99,16 @@ class TestAsyncTransport::ReadEvent {
   char* dataEnd_;
 
   bool isError_;
-  TTransportException exception_;
+  folly::AsyncSocketException exception_;
 
-  int64_t delay_; // milliseconds
+  std::chrono::milliseconds delay_;
 };
 
 /*
  * TestAsyncTransport::WriteEvent methods
  */
 
-TestAsyncTransport::WriteEvent::WriteEvent(int64_t time, size_t count)
+TestAsyncTransport::WriteEvent::WriteEvent(TimePoint time, size_t count)
   : time_(time),
     count_(count) {
   // Initialize all of the iov_base pointers to nullptr.  This way we won't free
@@ -135,7 +134,7 @@ TestAsyncTransport::WriteEvent::newEvent(const struct iovec* vec,
     throw std::bad_alloc();
   }
 
-  int64_t now = Util::currentTime();
+  auto now = proxygen::getCurrentTime();
   shared_ptr<WriteEvent> event(new(buf) WriteEvent(now, count),
                                destroyEvent);
   for (size_t n = 0; n < count; ++n) {
@@ -167,12 +166,10 @@ TestAsyncTransport::WriteEvent::destroyEvent(WriteEvent* event) {
  */
 
 TestAsyncTransport::TestAsyncTransport(EventBase* eventBase)
-  : TAsyncTimeout(eventBase),
+  : AsyncTimeout(eventBase),
     eventBase_(eventBase),
     readCallback_(nullptr),
     sendTimeout_(0),
-    prevReadEventTime_(0),
-    nextReadEventTime_(0),
     readState_(kStateOpen),
     writeState_(kStateOpen),
     readEvents_()
@@ -180,7 +177,7 @@ TestAsyncTransport::TestAsyncTransport(EventBase* eventBase)
 }
 
 void
-TestAsyncTransport::setReadCallback(ReadCallback* callback) {
+TestAsyncTransport::setReadCB(AsyncTransportWrapper::ReadCallback* callback) {
   if (readCallback_ == callback) {
     return;
   }
@@ -197,10 +194,10 @@ TestAsyncTransport::setReadCallback(ReadCallback* callback) {
     callback->readEOF();
     return;
   } else if (readState_ == kStateError) {
-    TTransportException ex(TTransportException::NOT_OPEN,
-                           "setReadCallback() called with socket in "
+    folly::AsyncSocketException ex(folly::AsyncSocketException::NOT_OPEN,
+                           "setReadCB() called with socket in "
                            "invalid state");
-    callback->readError(ex);
+    callback->readErr(ex);
     return;
   }
 
@@ -216,21 +213,21 @@ TestAsyncTransport::setReadCallback(ReadCallback* callback) {
     return;
   }
 
-  if (nextReadEventTime_ == 0) {
+  if (!proxygen::timePointInitialized(nextReadEventTime_)) {
     // Either readEvents_ is empty, or startReadEvents() hasn't been called yet
     return;
   }
   CHECK(!readEvents_.empty());
-  scheduleNextReadEvent(Util::currentTime());
+  scheduleNextReadEvent(proxygen::getCurrentTime());
 }
 
 TestAsyncTransport::ReadCallback*
 TestAsyncTransport::getReadCallback() const {
-  return readCallback_;
+  return dynamic_cast<TestAsyncTransport::ReadCallback*>(readCallback_);
 }
 
 void
-TestAsyncTransport::write(WriteCallback* callback,
+TestAsyncTransport::write(AsyncTransportWrapper::WriteCallback* callback,
                           const void* buf, size_t bytes,
                           WriteFlags flags) {
   iovec op;
@@ -240,7 +237,7 @@ TestAsyncTransport::write(WriteCallback* callback,
 }
 
 void
-TestAsyncTransport::writev(WriteCallback* callback,
+TestAsyncTransport::writev(AsyncTransportWrapper::WriteCallback* callback,
                            const iovec* vec, size_t count,
                            WriteFlags flags) {
   if (isSet(flags, WriteFlags::CORK)) {
@@ -249,9 +246,11 @@ TestAsyncTransport::writev(WriteCallback* callback,
     eorCount_++;
   }
   if (!writesAllowed()) {
-    TTransportException ex(TTransportException::NOT_OPEN,
+    AsyncSocketException ex(AsyncSocketException::NOT_OPEN,
                            "write() called on non-open TestAsyncTransport");
-    callback->writeError(0, ex);
+    auto cb = dynamic_cast<WriteCallback*>(callback);
+    DCHECK(cb);
+    cb->writeErr(0, ex);
     return;
   }
 
@@ -259,14 +258,14 @@ TestAsyncTransport::writev(WriteCallback* callback,
   if (writeState_ == kStatePaused || pendingWriteEvents_.size() > 0)  {
     pendingWriteEvents_.push_back(std::make_pair(event, callback));
   } else {
-    CHECK(writeState_ == kStateOpen);
+    CHECK_EQ(writeState_, kStateOpen);
     writeEvents_.push_back(event);
     callback->writeSuccess();
   }
 }
 
 void
-TestAsyncTransport::writeChain(WriteCallback* callback,
+TestAsyncTransport::writeChain(AsyncTransportWrapper::WriteCallback* callback,
                                std::unique_ptr<folly::IOBuf>&& iob,
                                WriteFlags flags) {
   size_t count = iob->countChainElements();
@@ -275,7 +274,7 @@ TestAsyncTransport::writeChain(WriteCallback* callback,
   const IOBuf* next = head;
   unsigned i = 0;
   do {
-    vec[i].iov_base = const_cast<uint8_t *>(next->buffer());
+    vec[i].iov_base = const_cast<uint8_t *>(next->data());
     vec[i++].iov_len = next->length();
     next = next->next();
   } while (next != head);
@@ -293,7 +292,7 @@ TestAsyncTransport::closeNow() {
     readState_ = kStateClosed;
 
     if (readCallback_ != nullptr) {
-      ReadCallback* callback = readCallback_;
+      folly::AsyncTransportWrapper::ReadCallback* callback = readCallback_;
       readCallback_ = nullptr;
       callback->readEOF();
     }
@@ -414,15 +413,18 @@ TestAsyncTransport::failPendingWrites() {
   while (!pendingWriteEvents_.empty()) {
     auto event = pendingWriteEvents_.front();
     pendingWriteEvents_.pop_front();
-    TTransportException ex(TTransportException::NOT_OPEN,
+    AsyncSocketException ex(AsyncSocketException::NOT_OPEN,
                            "Transport closed locally");
-    event.second->writeError(0, ex);
+    auto cb = dynamic_cast<WriteCallback*>(event.second);
+    if (cb) {
+      cb->writeErr(0, ex);
+    }
   }
 }
 
 void
 TestAsyncTransport::addReadEvent(folly::IOBufQueue& chain,
-                                 int64_t delayFromPrevious) {
+                                 std::chrono::milliseconds delayFromPrevious) {
   while (true) {
     unique_ptr<IOBuf> cur = chain.pop_front();
     if (!cur) {
@@ -434,7 +436,7 @@ TestAsyncTransport::addReadEvent(folly::IOBufQueue& chain,
 
 void
 TestAsyncTransport::addReadEvent(const void* buf, size_t buflen,
-                                 int64_t delayFromPrevious) {
+                                 std::chrono::milliseconds delayFromPrevious) {
   if (!readEvents_.empty() && readEvents_.back()->isFinalEvent()) {
     LOG(FATAL) << "cannot add more read events after an error or EOF";
   }
@@ -444,18 +446,19 @@ TestAsyncTransport::addReadEvent(const void* buf, size_t buflen,
 }
 
 void
-TestAsyncTransport::addReadEvent(const char* buf, int64_t delayFromPrevious) {
+TestAsyncTransport::addReadEvent(const char* buf,
+                                 std::chrono::milliseconds delayFromPrevious) {
   addReadEvent(buf, strlen(buf), delayFromPrevious);
 }
 
 void
-TestAsyncTransport::addReadEOF(int64_t delayFromPrevious) {
+TestAsyncTransport::addReadEOF(std::chrono::milliseconds delayFromPrevious) {
   addReadEvent(nullptr, 0, delayFromPrevious);
 }
 
 void
-TestAsyncTransport::addReadError(const TTransportException& ex,
-                                 int64_t delayFromPrevious) {
+TestAsyncTransport::addReadError(const folly::AsyncSocketException& ex,
+                                 std::chrono::milliseconds delayFromPrevious) {
   if (!readEvents_.empty() && readEvents_.back()->isFinalEvent()) {
     LOG(FATAL) << "cannot add a read error after an error or EOF";
   }
@@ -472,7 +475,7 @@ TestAsyncTransport::addReadEvent(const shared_ptr<ReadEvent>& event) {
   if (!firstEvent) {
     return;
   }
-  if (prevReadEventTime_ == 0) {
+  if (!proxygen::timePointInitialized(prevReadEventTime_)) {
     return;
   }
 
@@ -481,12 +484,12 @@ TestAsyncTransport::addReadEvent(const shared_ptr<ReadEvent>& event) {
     return;
   }
 
-  scheduleNextReadEvent(Util::currentTime());
+  scheduleNextReadEvent(proxygen::getCurrentTime());
 }
 
 void
 TestAsyncTransport::startReadEvents() {
-  int64_t now = Util::currentTime();
+  auto now = proxygen::getCurrentTime();
   prevReadEventTime_ = now;
 
   if (readEvents_.empty()) {
@@ -502,11 +505,12 @@ TestAsyncTransport::startReadEvents() {
 }
 
 void
-TestAsyncTransport::scheduleNextReadEvent(int64_t now) {
+TestAsyncTransport::scheduleNextReadEvent(TimePoint now) {
   if (nextReadEventTime_ <= now) {
     fireNextReadEvent();
   } else {
-    scheduleTimeout(nextReadEventTime_ - now);
+    scheduleTimeout(std::chrono::duration_cast<std::chrono::milliseconds>
+                    (nextReadEventTime_ - now));
   }
 }
 
@@ -514,7 +518,7 @@ void
 TestAsyncTransport::fireNextReadEvent() {
   DestructorGuard dg(this);
   CHECK(!readEvents_.empty());
-  CHECK(readCallback_ != nullptr);
+  CHECK_NOTNULL(readCallback_);
 
   // maxReadAtOnce prevents us from starving other users of this EventBase
   unsigned int const maxReadAtOnce = 30;
@@ -522,12 +526,13 @@ TestAsyncTransport::fireNextReadEvent() {
     fireOneReadEvent();
 
     if (readCallback_ == nullptr || eventBase_ == nullptr ||
-        nextReadEventTime_ == 0) {
+        !proxygen::timePointInitialized(nextReadEventTime_)) {
       return;
     }
-    int64_t now = Util::currentTime();
+    auto now = proxygen::getCurrentTime();
     if (nextReadEventTime_ > now) {
-      scheduleTimeout(nextReadEventTime_ - now);
+      scheduleTimeout(std::chrono::duration_cast<std::chrono::milliseconds>
+                      (nextReadEventTime_ - now));
       return;
     }
   }
@@ -541,13 +546,13 @@ TestAsyncTransport::fireNextReadEvent() {
 void
 TestAsyncTransport::fireOneReadEvent() {
   CHECK(!readEvents_.empty());
-  CHECK(readCallback_ != nullptr);
+  CHECK_NOTNULL(readCallback_);
 
   const shared_ptr<ReadEvent>& event = readEvents_.front();
 
   // Note that we call getReadBuffer() here even if we know the next event may
-  // be an EOF or an error.  This matches the behavior of TAsyncSocket.
-  // (Because TAsyncSocket merely gets notification that the socket is readable,
+  // be an EOF or an error.  This matches the behavior of AsyncSocket.
+  // (Because AsyncSocket merely gets notification that the socket is readable,
   // and has to call getReadBuffer() before it can make the actual read call to
   // get an error or EOF.)
   void* buf;
@@ -555,7 +560,7 @@ TestAsyncTransport::fireOneReadEvent() {
   try {
     readCallback_->getReadBuffer(&buf, &buflen);
   } catch (...) {
-    // TODO: we should convert the error to a TTransportException and call
+    // TODO: we should convert the error to a AsyncSocketException and call
     // readError() here.
     LOG(FATAL) << "readCallback_->getReadBuffer() threw an error";
   }
@@ -576,11 +581,11 @@ TestAsyncTransport::fireOneReadEvent() {
     shared_ptr<ReadEvent> eventPointerCopy = readEvents_.front();
     readEvents_.pop_front();
     CHECK(readEvents_.empty());
-    nextReadEventTime_ = 0;
+    nextReadEventTime_ = {};
 
-    ReadCallback* callback = readCallback_;
+    auto callback = readCallback_;
     readCallback_ = nullptr;
-    callback->readError(eventPointerCopy->getException());
+    callback->readErr(eventPointerCopy->getException());
     return;
   }
 
@@ -591,9 +596,9 @@ TestAsyncTransport::fireOneReadEvent() {
 
     readEvents_.pop_front();
     CHECK(readEvents_.empty());
-    nextReadEventTime_ = 0;
+    nextReadEventTime_ = {};
 
-    ReadCallback* callback = readCallback_;
+    auto callback = readCallback_;
     readCallback_ = nullptr;
     callback->readEOF();
     return;
@@ -619,7 +624,7 @@ TestAsyncTransport::fireOneReadEvent() {
     readEvents_.pop_front();
 
     if (readEvents_.empty()) {
-      nextReadEventTime_ = 0;
+      nextReadEventTime_ = {};
     } else {
       nextReadEventTime_ = prevReadEventTime_ + readEvents_.front()->getDelay();
     }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,11 +9,10 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKHeader.h"
-
 #include <folly/Memory.h>
 #include <folly/dynamic.h>
 #include <memory>
+#include <proxygen/lib/http/codec/compress/HPACKHeader.h>
 #include <string>
 #include <vector>
 
@@ -27,9 +26,14 @@ class HTTPArchive {
 
   static std::unique_ptr<HTTPArchive> fromFile(const std::string& filename);
 
+  static std::unique_ptr<HTTPArchive> fromPublicFile(const std::string& fname);
+
   // helper function for extracting a list of headers from a json array
   static void extractHeaders(folly::dynamic& obj,
                              std::vector<HPACKHeader>& msg);
+
+  static void extractHeadersFromPublic(folly::dynamic& obj,
+                                       std::vector<HPACKHeader>& msg);
 
   static uint32_t getSize(const std::vector<HPACKHeader>& headers);
 };

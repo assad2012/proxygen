@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,11 +7,10 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/services/RequestWorker.h"
-
-#include "proxygen/lib/services/ServiceWorker.h"
+#include <proxygen/lib/services/RequestWorker.h>
 
 #include <folly/io/async/EventBaseManager.h>
+#include <proxygen/lib/services/ServiceWorker.h>
 
 namespace proxygen {
 
@@ -27,9 +26,14 @@ uint64_t RequestWorker::nextRequestId() {
 
 void RequestWorker::flushStats() {
   CHECK(getEventBase()->isInEventBaseThread());
-  FOR_EACH_KV (service, worker, serviceWorkers_) {
-    worker->flushStats();
+  for (auto& p: serviceWorkers_) {
+    p.second->flushStats();
   }
+}
+
+void RequestWorker::setup() {
+  WorkerThread::setup();
+  callback_.workerStarted(this);
 }
 
 void RequestWorker::cleanup() {

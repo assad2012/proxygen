@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,13 +7,12 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/test/TestUtil.h"
-
-#include "proxygen/lib/http/codec/compress/Logging.h"
+#include <proxygen/lib/http/codec/compress/test/TestUtil.h>
 
 #include <fstream>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <proxygen/lib/http/codec/compress/Logging.h>
 
 using folly::IOBuf;
 using std::ofstream;
@@ -44,18 +43,22 @@ unique_ptr<IOBuf> encodeDecode(
   CHECK(!decoder.hasError());
 
   EXPECT_EQ(headers.size(), decodedHeaders->size());
-  CHECK(headers.size() == decodedHeaders->size());
   sort(decodedHeaders->begin(), decodedHeaders->end());
   sort(headers.begin(), headers.end());
   if (headers.size() != decodedHeaders->size()) {
-    printDelta(*decodedHeaders, headers);
+    std::cerr << printDelta(*decodedHeaders, headers);
+    CHECK(false) << "Mismatched headers size";
   }
   EXPECT_EQ(headers, *decodedHeaders);
+  if (headers != *decodedHeaders) {
+    std::cerr << printDelta(headers, *decodedHeaders);
+    CHECK(false) << "Mismatched headers";
+  }
   // header tables should look the same
   CHECK(encoder.getTable() == decoder.getTable());
   EXPECT_EQ(encoder.getTable(), decoder.getTable());
 
-  return std::move(encoded);
+  return encoded;
 }
 
 }}

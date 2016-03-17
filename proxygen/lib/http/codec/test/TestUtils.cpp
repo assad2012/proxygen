@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,8 +7,10 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/test/TestUtils.h"
+#include <proxygen/lib/http/codec/test/TestUtils.h>
+#include <proxygen/lib/http/codec/SPDYConstants.h>
 
+#include <boost/optional/optional_io.hpp>
 #include <folly/Random.h>
 #include <folly/io/Cursor.h>
 
@@ -25,7 +27,7 @@ const HTTPSettings kDefaultIngressSettings{
 
 std::unique_ptr<HTTPMessage> getPriorityMessage(uint8_t priority) {
   auto ret = folly::make_unique<HTTPMessage>();
-  ret->setSPDY(2);
+  ret->setAdvancedProtocolString(spdy::kVersionStrv2);
   ret->setPriority(priority);
   return ret;
 }
@@ -49,6 +51,8 @@ makeMockParallelCodec(TransportDirection dir) {
   auto codec = folly::make_unique<testing::NiceMock<MockHTTPCodec>>();
   EXPECT_CALL(*codec, supportsParallelRequests())
     .WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*codec, getProtocol())
+    .WillRepeatedly(testing::Return(CodecProtocol::SPDY_3_1));
   EXPECT_CALL(*codec, isReusable())
     .WillRepeatedly(testing::Return(true));
   EXPECT_CALL(*codec, getTransportDirection())
@@ -95,6 +99,16 @@ std::unique_ptr<HTTPMessage> makePostRequest() {
   return folly::make_unique<HTTPMessage>(getPostRequest());
 }
 
+HTTPMessage getResponse(uint32_t code, uint32_t bodyLen) {
+  HTTPMessage resp;
+  resp.setStatusCode(code);
+  if (bodyLen > 0) {
+    resp.getHeaders().set(HTTP_HEADER_CONTENT_LENGTH,
+                          folly::to<string>(bodyLen));
+  }
+  return resp;
+}
+
 std::unique_ptr<HTTPMessage> makeResponse(uint16_t statusCode) {
   auto resp = folly::make_unique<HTTPMessage>();
   resp->setStatusCode(statusCode);
@@ -108,21 +122,35 @@ makeResponse(uint16_t statusCode, size_t len) {
   return std::make_pair(std::move(resp), makeBuf(len));
 }
 
+HTTPMessage getUpgradeRequest(const std::string& upgradeHeader,
+                              HTTPMethod method, uint32_t bodyLen) {
+  HTTPMessage req = getGetRequest();
+  req.setMethod(method);
+  req.getHeaders().set(HTTP_HEADER_UPGRADE, upgradeHeader);
+  if (bodyLen > 0) {
+    req.getHeaders().set(HTTP_HEADER_CONTENT_LENGTH,
+                         folly::to<std::string>(bodyLen));
+  }
+  return req;
+}
+
 void fakeMockCodec(MockHTTPCodec& codec) {
   // For each generate* function, write some data to the chain
-  EXPECT_CALL(codec, generateHeader(_, _, _, _, _))
+  EXPECT_CALL(codec, generateHeader(_, _, _, _, _, _))
     .WillRepeatedly(Invoke([] (folly::IOBufQueue& writeBuf,
                                HTTPCodec::StreamID stream,
                                const HTTPMessage& msg,
                                HTTPCodec::StreamID assocStream,
+                               bool eom,
                                HTTPHeaderSize* size) {
                              writeBuf.append(makeBuf(10));
                            }));
 
-  EXPECT_CALL(codec, generateBody(_, _, _, _))
+  EXPECT_CALL(codec, generateBody(_, _, _, _, _))
     .WillRepeatedly(Invoke([] (folly::IOBufQueue& writeBuf,
                                HTTPCodec::StreamID stream,
                                std::shared_ptr<folly::IOBuf> chain,
+                               boost::optional<uint8_t> padding,
                                bool eom) {
                              auto len = chain->computeChainDataLength();
                              writeBuf.append(chain->clone());
@@ -167,10 +195,11 @@ void fakeMockCodec(MockHTTPCodec& codec) {
                              return 6;
                            }));
 
-  EXPECT_CALL(codec, generateGoaway(_, _, _))
+  EXPECT_CALL(codec, generateGoaway(_, _, _, _))
     .WillRepeatedly(Invoke([] (folly::IOBufQueue& writeBuf,
                                uint32_t lastStream,
-                               ErrorCode code) {
+                               ErrorCode,
+                               std::shared_ptr<folly::IOBuf>) {
                              writeBuf.append(makeBuf(6));
                              return 6;
                            }));

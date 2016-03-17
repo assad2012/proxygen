@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -81,6 +81,14 @@ class Service {
    * forceStop() isn't strictly required.)
    */
   virtual void forceStop() {}
+
+  /**
+   * Perform per-thread init.
+   *
+   * This method will be called once for each RequestWorker thread, just after
+   * the worker thread started.
+   */
+  virtual void initWorkerState(RequestWorker*) {}
 
   /**
    * Perform per-thread cleanup.

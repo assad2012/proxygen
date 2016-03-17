@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,15 +9,20 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKConstants.h"
-
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
+#include <proxygen/lib/http/codec/compress/HPACKConstants.h>
 #include <string>
 
-namespace proxygen {
+namespace proxygen { namespace huffman {
 
-namespace huffman {
+// size of the huffman tables (codes and bits)
+const uint32_t kTableSize = 256;
+
+// not used explicitly, since the prefixes are all 1's and they are
+// used only for padding of up to 7 bits
+const uint32_t kEOSReqHpack05 = 0x3ffffdc;
+const uint32_t kEOSRespHpack05 = 0xffffdd;
 
 /**
  * node from the huffman tree
@@ -25,12 +30,17 @@ namespace huffman {
  * A leaf has no index table, or index == nullptr
  */
 struct HuffNode {
-  uint8_t ch{0};   // leafs hold characters
-  uint8_t bits{0}; // how many bits are used for representing ch
-  uint8_t superNode{0};
+  union {
+    uint8_t ch;   // leafs hold characters
+    uint8_t superNodeIndex;
+  } data{0};
+  struct {
+    uint8_t bits:4; // how many bits are used for representing ch, range is 0-8
+    bool isSuperNode:1;
+  } metadata{0,false};
 
   bool isLeaf() const {
-    return superNode == 0;
+    return !metadata.isSuperNode;
   }
 };
 
@@ -73,16 +83,62 @@ struct SuperHuffNode {
  */
 class HuffTree {
  public:
+  /**
+   * the constructor assumes the codes and bits tables will not be freed,
+   * ideally they are static
+   */
   explicit HuffTree(const uint32_t* codes, const uint8_t* bits);
   ~HuffTree() {}
+
+  /**
+   * decode bitstream into a string literal
+   *
+   * @param buf start of a huffman-encoded bit stream
+   * @param size size of the buffer
+   * @param literal where to append decoded characters
+   *
+   * @return true if the decode process was successful
+   */
   bool decode(const uint8_t* buf, uint32_t size, std::string& literal) const;
+
+  /**
+   * encode string literal into huffman encoded bit stream
+   *
+   * @param literal string to encode
+   * @param buf where to append the encoded binary data
+   */
+  uint32_t encode(const std::string& literal,
+                  folly::io::QueueAppender& buf) const;
+
+  /**
+   * get the encode size for a string literal, works as a dry-run for the encode
+   * useful to allocate enough buffer space before doing the actual encode
+   *
+   * @param literal string literal
+   * @return size how many bytes it will take to encode the given string
+   */
+  uint32_t getEncodeSize(const std::string& literal) const;
+
+  /**
+   * get the binary representation for a given character, as a 32-bit word and
+   * a number of bits is represented on (<32). The code is aligned to LSB.
+   *
+   * @param ch ASCII character
+   * @return pair<word, bits>
+   *
+   * Example:
+   * 'e' will be encoded as 1 using 4 bits: 0001
+   */
+  std::pair<uint32_t, uint8_t> getCode(uint8_t ch) const;
+
+  // get internal tables for codes and bit lengths, useful for testing
   const uint32_t* codesTable() const;
   const uint8_t* bitsTable() const;
 
  private:
   void fillIndex(SuperHuffNode& snode, uint32_t code, uint8_t bits, uint8_t ch,
      uint8_t level);
-  void buildTable();
+  void buildTree();
   void insert(uint32_t code, uint8_t bits, uint8_t ch);
 
   uint32_t nodes_{0};
@@ -94,45 +150,8 @@ class HuffTree {
   SuperHuffNode table_[46];
 };
 
-const HuffTree& reqHuffTree();
-const HuffTree& respHuffTree();
+// accessors for static huffman trees from the draft-05 version of HPACK
+const HuffTree& reqHuffTree05();
+const HuffTree& respHuffTree05();
 
-/**
- * encode the given string using Huffman encoding
- *
- * @return number of bytes used for encoding
- */
-uint32_t encode(const std::string& literal,
-                HPACK::MessageType msgType,
-                folly::io::QueueAppender& buf);
-
-/**
- * decode a block of size bytes into the given literal
- */
-void decode(HPACK::MessageType msgType,
-            const uint8_t* buf,
-            uint32_t size,
-            std::string& literal);
-
-/**
- * Get the Huffman code for a given character and HTTP message type {req,resp}
- *
- * @return The value of the code represented as a 32-bit unsigned value and
- *         the number of bits needed to represent the value in a bit stream.
- *         The code is aligned to LSB.
- *
- * Example:
- * 'e' will be encoded as 1 using 4 bits: 0001
- */
-uint32_t getCode(uint8_t ch, HPACK::MessageType msgType,
-                 uint8_t* bits);
-
-/**
- * Get the number of bytes we need to represent the given string using Huffman
- * encoding
- */
-uint32_t getSize(const std::string& literal,
-                 HPACK::MessageType msgType);
-}
-
-}
+}}

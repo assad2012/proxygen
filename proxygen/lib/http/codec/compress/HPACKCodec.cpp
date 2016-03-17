@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,13 +7,12 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKCodec.h"
-
-#include "proxygen/lib/http/codec/compress/HPACKHeader.h"
+#include <proxygen/lib/http/codec/compress/HPACKCodec.h>
 
 #include <algorithm>
 #include <folly/String.h>
 #include <folly/io/Cursor.h>
+#include <proxygen/lib/http/codec/compress/HPACKHeader.h>
 
 using folly::IOBuf;
 using folly::io::Cursor;
@@ -24,6 +23,8 @@ using std::unique_ptr;
 using std::vector;
 
 namespace proxygen {
+
+const std::string kHpackNpn = "spdy/3.1-fb-0.5";
 
 HPACKCodec::HPACKCodec(TransportDirection direction) {
   HPACK::MessageType encoderType;
@@ -37,7 +38,8 @@ HPACKCodec::HPACKCodec(TransportDirection direction) {
     encoderType = HPACK::MessageType::REQ;
   }
   encoder_ = folly::make_unique<HPACKEncoder>(encoderType, true);
-  decoder_ = folly::make_unique<HPACKDecoder>(decoderType);
+  decoder_ = folly::make_unique<HPACKDecoder>(decoderType, HPACK::kTableSize,
+                                              maxUncompressed_);
 }
 
 unique_ptr<IOBuf> HPACKCodec::encode(vector<Header>& headers) noexcept {
@@ -45,12 +47,13 @@ unique_ptr<IOBuf> HPACKCodec::encode(vector<Header>& headers) noexcept {
   // convert to HPACK API format
   uint32_t uncompressed = 0;
   for (const auto& h : headers) {
-    HPACKHeader header(*h.name, *h.value);
+    converted.emplace_back(*h.name, *h.value);
     // This is ugly but since we're not changing the size
     // of the string I'm assuming this is OK
+    auto& header = converted.back();
     char* mutableName = const_cast<char*>(header.name.data());
     folly::toLowerAscii(mutableName, header.name.size());
-    converted.push_back(header);
+
     uncompressed += header.name.size() + header.value.size() + 2;
   }
   auto buf = encoder_->encode(converted, encodeHeadroom_);
@@ -62,7 +65,7 @@ unique_ptr<IOBuf> HPACKCodec::encode(vector<Header>& headers) noexcept {
   if (stats_) {
     stats_->recordEncode(Type::HPACK, encodedSize_);
   }
-  return std::move(buf);
+  return buf;
 }
 
 Result<HeaderDecodeResult, HeaderDecodeError>
@@ -71,6 +74,20 @@ HPACKCodec::decode(Cursor& cursor, uint32_t length) noexcept {
   decodedHeaders_.clear();
   auto consumed = decoder_->decode(cursor, length, decodedHeaders_);
   if (decoder_->hasError()) {
+    LOG(ERROR) << "decoder state: " << decoder_->getTable();
+    LOG(ERROR) << "partial headers: ";
+    for (const auto& hdr: decodedHeaders_) {
+      LOG(ERROR) << "name=" << hdr.name.c_str()
+                 << " value=" << hdr.value.c_str();
+    }
+    auto err = decoder_->getError();
+    if (err == HPACK::DecodeError::HEADERS_TOO_LARGE ||
+        err == HPACK::DecodeError::LITERAL_TOO_LARGE) {
+      if (stats_) {
+        stats_->recordDecodeTooLarge(Type::HPACK);
+      }
+      return HeaderDecodeError::HEADERS_TOO_LARGE;
+    }
     if (stats_) {
       stats_->recordDecodeError(Type::HPACK);
     }
@@ -78,20 +95,17 @@ HPACKCodec::decode(Cursor& cursor, uint32_t length) noexcept {
   }
   // convert to HeaderPieceList
   uint32_t uncompressed = 0;
-  // sort the headers to detect duplicates/multi-valued headers
-  // * this is really unrelated to HPACK, just a need to mimic GzipHeaderCodec
-  sort(decodedHeaders_.begin(), decodedHeaders_.end());
-
   for (uint32_t i = 0; i < decodedHeaders_.size(); i++) {
     const HPACKHeader& h = decodedHeaders_[i];
-    bool multiValued =
-      (i > 0 && decodedHeaders_[i - 1].name == h.name) ||
-      (i < decodedHeaders_.size() - 1 && decodedHeaders_[i + 1].name == h.name);
+    // SPDYCodec uses this 'multi-valued' flag to detect illegal duplicates
+    // Since HPACK does not preclude duplicates, pretend everything is
+    // multi-valued
+    bool multiValued = true;
     // one entry for the name and one for the value
-    outHeaders_.push_back(HeaderPiece((char *)h.name.c_str(), h.name.size(),
-                                     false, multiValued));
-    outHeaders_.push_back(HeaderPiece((char *)h.value.c_str(), h.value.size(),
-                                     false, multiValued));
+    outHeaders_.emplace_back((char *)h.name.c_str(), h.name.size(),
+                             false, multiValued);
+    outHeaders_.emplace_back((char *)h.value.c_str(), h.value.size(),
+                             false, multiValued);
     uncompressed += h.name.size() + h.value.size() + 2;
   }
   decodedSize_.compressed = consumed;
@@ -102,4 +116,43 @@ HPACKCodec::decode(Cursor& cursor, uint32_t length) noexcept {
   return HeaderDecodeResult{outHeaders_, consumed};
 }
 
+void HPACKCodec::decodeStreaming(
+    Cursor& cursor,
+    uint32_t length,
+    HeaderCodec::StreamingCallback* streamingCb) noexcept {
+  decodedSize_.uncompressed = 0;
+  streamingCb_ = streamingCb;
+  auto consumed = decoder_->decodeStreaming(cursor, length, this);
+  if (decoder_->hasError()) {
+    onDecodeError(HeaderDecodeError::NONE);
+    return;
+  }
+  decodedSize_.compressed = consumed;
+  onHeadersComplete();
+}
+
+void HPACKCodec::onHeader(const std::string& name, const std::string& value) {
+  assert(streamingCb_ != nullptr);
+  decodedSize_.uncompressed += name.size() + value.size() + 2;
+  streamingCb_->onHeader(name, value);
+}
+
+void HPACKCodec::onHeadersComplete() {
+  assert(streamingCb_ != nullptr);
+  if (stats_) {
+    stats_->recordDecode(Type::HPACK, decodedSize_);
+  }
+  streamingCb_->onHeadersComplete();
+}
+
+void HPACKCodec::onDecodeError(HeaderDecodeError decodeError) {
+  assert(streamingCb_ != nullptr);
+  if (stats_) {
+    stats_->recordDecodeError(Type::HPACK);
+  }
+  if (decoder_->getError() == HPACK::DecodeError::HEADERS_TOO_LARGE) {
+    streamingCb_->onDecodeError(HeaderDecodeError::HEADERS_TOO_LARGE);
+  }
+  streamingCb_->onDecodeError(HeaderDecodeError::BAD_ENCODING);
+}
 }

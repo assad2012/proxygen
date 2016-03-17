@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,12 +7,12 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/httpserver/RequestHandlerAdaptor.h"
-
-#include "proxygen/httpserver/RequestHandler.h"
-#include "proxygen/httpserver/ResponseBuilder.h"
+#include <proxygen/httpserver/RequestHandlerAdaptor.h>
 
 #include <boost/algorithm/string.hpp>
+#include <proxygen/httpserver/PushHandler.h>
+#include <proxygen/httpserver/RequestHandler.h>
+#include <proxygen/httpserver/ResponseBuilder.h>
 
 namespace proxygen {
 
@@ -168,13 +168,25 @@ void RequestHandlerAdaptor::resumeIngress() noexcept {
   txn_->resumeIngress();
 }
 
-const TransportInfo&
+ResponseHandler* RequestHandlerAdaptor::newPushedResponse(
+  PushHandler* pushHandler) noexcept {
+  auto pushTxn = txn_->newPushedTransaction(pushHandler->getHandler());
+  if (!pushTxn) {
+    // Codec doesn't support push
+    return nullptr;;
+  }
+  auto pushHandlerAdaptor = new RequestHandlerAdaptor(pushHandler);
+  pushHandlerAdaptor->setTransaction(pushTxn);
+  return pushHandlerAdaptor;
+}
+
+const wangle::TransportInfo&
 RequestHandlerAdaptor::getSetupTransportInfo() const noexcept {
   return txn_->getSetupTransportInfo();
 }
 
 void RequestHandlerAdaptor::getCurrentTransportInfo(
-  TransportInfo* tinfo) const {
+  wangle::TransportInfo* tinfo) const {
   txn_->getCurrentTransportInfo(tinfo);
 }
 

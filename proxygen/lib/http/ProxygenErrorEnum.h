@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -10,9 +10,6 @@
 #pragma once
 
 namespace proxygen {
-
-// TODO #5101452 remove all references to "read" and "write" since that
-// should be indicated by the direction field of HTTPException
 
 // Max must be the last one.
 #define PROXYGEN_ERROR_GEN(x)                   \
@@ -53,6 +50,15 @@ namespace proxygen {
     x(IngressStateTransition),                  \
     x(ClientSilent),                            \
     x(Canceled),                                \
+    x(ParseResponse),                           \
+    x(ConnRefused),                             \
+    x(DNSOtherServer),                          \
+    x(DNSOtherClient),                          \
+    x(DNSOtherCancelled),                       \
+    x(DNSshutdown),                             \
+    x(DNSgetaddrinfo),                          \
+    x(DNSthreadpool),                           \
+    x(DNSunimplemented),                        \
     x(Max)
 
 // Increase this if you add more error types and Max exceeds 63

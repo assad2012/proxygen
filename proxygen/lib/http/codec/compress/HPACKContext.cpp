@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,7 +7,7 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKContext.h"
+#include <proxygen/lib/http/codec/compress/HPACKContext.h>
 
 #include <folly/io/IOBuf.h>
 
@@ -22,11 +22,11 @@ HPACKContext::HPACKContext(HPACK::MessageType msgType, uint32_t tableSize) :
 uint32_t HPACKContext::getIndex(const HPACKHeader& header) const {
   uint32_t index = table_.getIndex(header);
   if (index) {
-    return index;
+    return dynamicToGlobalIndex(index);
   }
-  index = StaticHeaderTable::get().getIndex(header);
+  index = getStaticTable().getIndex(header);
   if (index) {
-    return table_.size() + index;
+    return staticToGlobalIndex(index);
   }
   return 0;
 }
@@ -34,11 +34,11 @@ uint32_t HPACKContext::getIndex(const HPACKHeader& header) const {
 uint32_t HPACKContext::nameIndex(const string& name) const {
   uint32_t index = table_.nameIndex(name);
   if (index) {
-    return index;
+    return dynamicToGlobalIndex(index);
   }
-  index = StaticHeaderTable::get().nameIndex(name);
+  index = getStaticTable().nameIndex(name);
   if (index) {
-    return table_.size() + index;
+    return staticToGlobalIndex(index);
   }
   return 0;
 }
@@ -46,14 +46,24 @@ uint32_t HPACKContext::nameIndex(const string& name) const {
 bool HPACKContext::isStatic(uint32_t index) const {
   return
     index > table_.size()
-    && index <= table_.size() + StaticHeaderTable::get().size();
+    && index <= table_.size() + getStaticTable().size();
+}
+
+const HPACKHeader& HPACKContext::getStaticHeader(uint32_t index) {
+  DCHECK(isStatic(index));
+  return getStaticTable()[globalToStaticIndex(index)];
+}
+
+const HPACKHeader& HPACKContext::getDynamicHeader(uint32_t index) {
+  DCHECK(!isStatic(index));
+  return table_[globalToDynamicIndex(index)];
 }
 
 const HPACKHeader& HPACKContext::getHeader(uint32_t index) {
   if (isStatic(index)) {
-    return StaticHeaderTable::get()[index - table_.size()];
+    return getStaticHeader(index);
   }
-  return table_[index];
+  return getDynamicHeader(index);
 }
 
 }

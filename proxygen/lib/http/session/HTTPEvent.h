@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/HTTPConstants.h"
-#include "proxygen/lib/http/codec/HTTPCodec.h"
-
 #include <glog/logging.h>
+#include <proxygen/lib/http/HTTPConstants.h>
+#include <proxygen/lib/http/codec/HTTPCodec.h>
 
 namespace proxygen {
 

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/session/HTTPSession.h"
-#include "proxygen/lib/http/session/HTTPSessionStats.h"
-
-#include <thrift/lib/cpp/transport/TSSLSocket.h>
+#include <folly/io/async/SSLContext.h>
+#include <proxygen/lib/http/session/HTTPSession.h>
+#include <proxygen/lib/http/session/HTTPSessionStats.h>
 
 namespace proxygen {
 
@@ -20,25 +19,57 @@ class HTTPSessionStats;
 class HTTPUpstreamSession final: public HTTPSession {
  public:
   /**
-   * @param sock       An open socket on which any applicable TLS handshaking
-   *                     has been completed already.
-   * @param localAddr  Address and port of the local end of the socket.
-   * @param peerAddr   Address and port of the remote end of the socket.
-   * @param codec      A codec with which to parse/generate messages in
-   *                     whatever HTTP-like wire format this session needs.
+   * @param sock           An open socket on which any applicable TLS
+   *                         handshaking has been completed already.
+   * @param localAddr      Address and port of the local end of the socket.
+   * @param peerAddr       Address and port of the remote end of the socket.
+   * @param codec          A codec with which to parse/generate messages in
+   *                         whatever HTTP-like wire format this session needs.
+   * @param maxVirtualPri  Number of virtual priority nodes to represent fixed
+   *                         priority levels.
    */
   HTTPUpstreamSession(
-      apache::thrift::async::TAsyncTimeoutSet* transactionTimeouts,
-      apache::thrift::async::TAsyncTransport::UniquePtr&& sock,
+      const WheelTimerInstance& timeout,
+      folly::AsyncTransportWrapper::UniquePtr&& sock,
       const folly::SocketAddress& localAddr,
       const folly::SocketAddress& peerAddr,
       std::unique_ptr<HTTPCodec> codec,
-      const TransportInfo& tinfo,
-      InfoCallback* infoCallback):
-    HTTPSession(transactionTimeouts, std::move(sock), localAddr, peerAddr,
-                nullptr, std::move(codec), tinfo, infoCallback) {
-    CHECK(codec_->getTransportDirection() == TransportDirection::UPSTREAM);
+      const wangle::TransportInfo& tinfo,
+      InfoCallback* infoCallback,
+      uint8_t maxVirtualPri = 0):
+    HTTPSession(
+        timeout,
+        std::move(sock),
+        localAddr,
+        peerAddr,
+        nullptr,
+        std::move(codec),
+        tinfo,
+        infoCallback),
+    maxVirtualPriorityLevel_(maxVirtualPri) {
+    auto asyncSocket = sock->getUnderlyingTransport<folly::AsyncSocket>();
+    if (asyncSocket) {
+      asyncSocket->setBufferCallback(this);
+    }
+    CHECK_EQ(codec_->getTransportDirection(), TransportDirection::UPSTREAM);
   }
+
+  // uses folly::HHWheelTimer instance which is used on client side & thrift
+  HTTPUpstreamSession(
+      folly::HHWheelTimer* timeout,
+      folly::AsyncTransportWrapper::UniquePtr&& sock,
+      const folly::SocketAddress& localAddr,
+      const folly::SocketAddress& peerAddr,
+      std::unique_ptr<HTTPCodec> codec,
+      const wangle::TransportInfo& tinfo,
+      InfoCallback* infoCallback,
+      uint8_t maxVirtualPri = 0):
+    HTTPUpstreamSession(WheelTimerInstance(timeout), std::move(sock), localAddr,
+        peerAddr, std::move(codec), tinfo, infoCallback, maxVirtualPri) {
+  }
+
+
+  void startNow() override;
 
   /**
    * Creates a new transaction on this upstream session. Invoking this function
@@ -46,18 +77,19 @@ class HTTPUpstreamSession final: public HTTPSession {
    *
    * @param handler The request handler to attach to this transaction. It must
    *                not be null.
-   * @param priority The priority to associate with this request. Lower numbers
-   *                 indicate higher priority. This parameter only has an effect
-   *                 if the session uses a parallel codec.
    */
-  HTTPTransaction* newTransaction(HTTPTransaction::Handler* handler,
-                                  int8_t priority = -1);
+  HTTPTransaction* newTransaction(HTTPTransaction::Handler* handler);
 
   /**
    * Returns true if this session has no open transactions and the underlying
    * transport can be used again in a new request.
    */
   bool isReusable() const;
+
+  /**
+   * Returns true if the session is shutting down
+   */
+  bool isClosing() const;
 
   /**
    * Drains the current transactions and prevents new transactions from being
@@ -90,6 +122,14 @@ class HTTPUpstreamSession final: public HTTPSession {
     HTTPTransaction* txn) override;
 
   bool allTransactionsStarted() const override;
+
+  bool onNativeProtocolUpgrade(
+    HTTPCodec::StreamID streamID, CodecProtocol protocol,
+    const std::string& protocolString,
+    HTTPMessage& msg) override;
+
+  uint8_t maxVirtualPriorityLevel_{0};
+
 };
 
 } // proxygen

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,14 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/HTTPServerOptions.h"
-#include "proxygen/lib/ssl/SSLContextConfig.h"
-
+#include <wangle/ssl/SSLContextConfig.h>
+#include <folly/io/async/AsyncServerSocket.h>
 #include <folly/io/async/EventBase.h>
+#include <wangle/bootstrap/ServerBootstrap.h>
+#include <proxygen/httpserver/HTTPServerOptions.h>
+#include <proxygen/lib/http/codec/HTTPCodecFactory.h>
+#include <proxygen/lib/http/session/HTTPSession.h>
 #include <thread>
-#include <thrift/lib/cpp/async/TAsyncServerSocket.h>
 
 namespace proxygen {
 
@@ -33,17 +35,21 @@ class HTTPServer final {
   enum class Protocol: uint8_t {
     HTTP,
     SPDY,
+    HTTP2,
   };
 
   struct IPConfig {
     IPConfig(folly::SocketAddress a,
-             Protocol p)
+             Protocol p,
+             std::shared_ptr<HTTPCodecFactory> c = nullptr)
         : address(a),
-          protocol(p) {}
+          protocol(p),
+          codecFactory(c) {}
 
     folly::SocketAddress address;
     Protocol protocol;
-    std::vector<SSLContextConfig> sslConfigs;
+    std::shared_ptr<HTTPCodecFactory> codecFactory;
+    std::vector<wangle::SSLContextConfig> sslConfigs;
   };
 
   /**
@@ -99,34 +105,22 @@ class HTTPServer final {
     return addresses_;
   }
 
+  /**
+   * Get the sockets the server is currently bound to.
+   */
+  const std::vector<const folly::AsyncSocketBase*> getSockets() const;
+
+  void setSessionInfoCallback(HTTPSession::InfoCallback* cb) {
+    sessionInfoCb_ = cb;
+  }
+
  private:
-  HTTPServerOptions options_;
+  std::shared_ptr<HTTPServerOptions> options_;
 
   /**
    * Event base in which we binded server sockets.
    */
   folly::EventBase* mainEventBase_{nullptr};
-
-  /**
-   * Server socket
-   */
-  std::vector<apache::thrift::async::TAsyncServerSocket::UniquePtr>
-      serverSockets_;
-
-  /**
-   * Struct to hold info about handle threads
-   */
-  struct HandlerThread {
-    std::thread thread;
-
-    folly::EventBase* eventBase{nullptr};
-
-    std::vector<std::unique_ptr<HTTPServerAcceptor>> acceptors;
-
-    uint32_t acceptorsRunning{0};
-  };
-
-  std::vector<HandlerThread> handlerThreads_;
 
   /**
    * Optional signal handlers on which we should shutdown server
@@ -137,6 +131,12 @@ class HTTPServer final {
    * Addresses we are listening on
    */
   std::vector<IPConfig> addresses_;
+  std::vector<wangle::ServerBootstrap<wangle::DefaultPipeline>> bootstrap_;
+
+  /**
+   * Callback for session create/destruction
+   */
+  HTTPSession::InfoCallback* sessionInfoCb_{nullptr};
 };
 
 }

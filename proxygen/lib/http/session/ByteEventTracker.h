@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,11 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/session/AckLatencyEvent.h"
-#include "proxygen/lib/http/session/ByteEvents.h"
-#include "proxygen/lib/http/session/HTTPTransaction.h"
-#include "proxygen/lib/utils/Time.h"
-
-#include <thrift/lib/cpp/async/TAsyncSocket.h>
+#include <proxygen/lib/http/session/AckLatencyEvent.h>
+#include <proxygen/lib/http/session/ByteEvents.h>
+#include <proxygen/lib/http/session/HTTPTransaction.h>
+#include <proxygen/lib/utils/Time.h>
+#include <folly/io/async/AsyncSocket.h>
 
 namespace proxygen {
 
@@ -65,8 +64,8 @@ class ByteEventTracker {
 
   virtual bool setMaxTcpAckTracked(
     uint32_t maxAckTracked,
-    apache::thrift::async::TAsyncTimeoutSet* ackLatencyTimeouts,
-    apache::thrift::async::TAsyncTransport* transport) { return false; }
+    AsyncTimeoutSet* ackLatencyTimeouts,
+    folly::AsyncTransportWrapper* transport) { return false; }
 
   virtual void setTTLBAStats(TTLBAStats* stats) {}
 

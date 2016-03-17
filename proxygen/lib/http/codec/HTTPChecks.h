@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,7 +9,7 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/HTTPCodecFilter.h"
+#include <proxygen/lib/http/codec/HTTPCodecFilter.h>
 
 namespace proxygen {
 
@@ -32,6 +32,7 @@ class HTTPChecks: public PassThroughHTTPCodecFilter {
                       StreamID stream,
                       const HTTPMessage& msg,
                       StreamID assocStream,
+                      bool eom,
                       HTTPHeaderSize* sizeOut) override;
 };
 

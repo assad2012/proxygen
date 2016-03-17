@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,13 +7,14 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/utils/ParseURL.h"
-
-#include "proxygen/external/http_parser/http_parser.h"
-#include "proxygen/lib/utils/UtilInl.h"
+#include <proxygen/lib/utils/ParseURL.h>
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <proxygen/lib/http/codec/SPDYUtil.h>
+#include <proxygen/lib/utils/UtilInl.h>
+
+#include "proxygen/external/http_parser/http_parser.h"
 
 using folly::fbstring;
 using std::string;
@@ -64,6 +65,12 @@ void ParseURL::parse() noexcept {
 
 void ParseURL::parseNonFully() noexcept {
   if (url_.empty()) {
+    valid_ = false;
+    return;
+  }
+
+  // Check if the URL has only printable characters and no control character.
+  if (!SPDYUtil::validateURL(url_)) {
     valid_ = false;
     return;
   }

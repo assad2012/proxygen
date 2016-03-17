@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,19 +7,23 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKDecodeBuffer.h"
-#include "proxygen/lib/http/codec/compress/HPACKEncodeBuffer.h"
-
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <proxygen/lib/http/codec/compress/HPACKDecodeBuffer.h>
+#include <proxygen/lib/http/codec/compress/HPACKEncodeBuffer.h>
 
 using namespace folly::io;
 using namespace folly;
 using namespace proxygen;
 using namespace std;
 using namespace testing;
+using proxygen::HPACK::DecodeError;
+
+namespace {
+const uint32_t kMaxLiteralSize = 1 << 17;
+}
 
 class HPACKBufferTests : public testing::Test {
  public:
@@ -28,7 +32,8 @@ class HPACKBufferTests : public testing::Test {
    * a queue with one IOBuf of 512 bytes in it
    */
   HPACKBufferTests() : encoder_(512),
-                       decoder_(HPACK::MessageType::REQ, cursor_, 0) {
+                       decoder_(huffman::reqHuffTree05(), cursor_, 0,
+                                kMaxLiteralSize) {
   }
 
  protected:
@@ -104,7 +109,7 @@ TEST_F(HPACKBufferTests, encode_plain_literal) {
 
 TEST_F(HPACKBufferTests, encode_huffman_literal) {
   string accept("accept-encoding");
-  HPACKEncodeBuffer encoder(512, HPACK::MessageType::REQ, true);
+  HPACKEncodeBuffer encoder(512, huffman::reqHuffTree05(), true);
   uint32_t size = encoder.encodeLiteral(accept);
   EXPECT_EQ(size, 11);
   releaseData(encoder);
@@ -121,23 +126,23 @@ TEST_F(HPACKBufferTests, decode_single_byte) {
   *wdata = 67;
   resetDecoder();
   uint32_t integer;
-  CHECK_EQ(decoder_.decodeInteger(7, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(7, integer), DecodeError::NONE);
   CHECK_EQ(integer, 67);
 
   resetDecoder();
 
-  CHECK_EQ(decoder_.decodeInteger(6, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(6, integer), DecodeError::NONE);
   CHECK_EQ(integer, 3);
 
   // set a bit in the prefix - it should not affect the decoded value
   *wdata = 195;  // 195 = 128 + 67
   resetDecoder();
-  CHECK_EQ(decoder_.decodeInteger(7, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(7, integer), DecodeError::NONE);
   CHECK_EQ(integer, 67);
 
   // 8-bit prefix - the entire byte
   resetDecoder();
-  CHECK_EQ(decoder_.decodeInteger(8, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(8, integer), DecodeError::NONE);
   CHECK_EQ(integer, 195);
 }
 
@@ -150,14 +155,14 @@ TEST_F(HPACKBufferTests, decode_multi_byte) {
   wdata[1] = 0;
   resetDecoder();
   uint32_t integer;
-  CHECK_EQ(decoder_.decodeInteger(2, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(2, integer), DecodeError::NONE);
   CHECK_EQ(integer, 3);
   CHECK_EQ(decoder_.cursor().length(), 0);
   // edge case - encode 130 = 127 + 3 on 2-bit prefix
   wdata[0] = 3;
   wdata[1] = 127;
   resetDecoder();
-  CHECK_EQ(decoder_.decodeInteger(2, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(2, integer), DecodeError::NONE);
   CHECK_EQ(integer, 130);
   CHECK_EQ(decoder_.cursor().length(), 0);
   // edge case - encode 131 = 128 + 3
@@ -166,7 +171,7 @@ TEST_F(HPACKBufferTests, decode_multi_byte) {
   wdata[1] = 128;
   wdata[2] = 1;
   resetDecoder();
-  CHECK_EQ(decoder_.decodeInteger(2, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(2, integer), DecodeError::NONE);
   CHECK_EQ(integer, 131);
   CHECK_EQ(decoder_.cursor().length(), 0);
   // encode the value from the RFC example - 1337
@@ -174,7 +179,7 @@ TEST_F(HPACKBufferTests, decode_multi_byte) {
   wdata[1] = 154;
   wdata[2] = 10;
   resetDecoder();
-  CHECK_EQ(decoder_.decodeInteger(5, integer), true);
+  CHECK_EQ(decoder_.decodeInteger(5, integer), DecodeError::NONE);
   CHECK_EQ(integer, 1337);
   CHECK_EQ(decoder_.cursor().length(), 0);
 }
@@ -184,7 +189,7 @@ TEST_F(HPACKBufferTests, decode_integer_error) {
   resetDecoder();
   // empty buffer
   uint32_t integer;
-  CHECK_EQ(decoder_.decodeInteger(5, integer), false);
+  CHECK_EQ(decoder_.decodeInteger(5, integer), DecodeError::BUFFER_UNDERFLOW);
 
   // incomplete buffer
   buf_->append(2);
@@ -192,7 +197,7 @@ TEST_F(HPACKBufferTests, decode_integer_error) {
   wdata[0] = 31;
   wdata[1] = 154;
   // wdata[2] = 10 missing
-  CHECK_EQ(decoder_.decodeInteger(5, integer), false);
+  CHECK_EQ(decoder_.decodeInteger(5, integer), DecodeError::BUFFER_UNDERFLOW);
 }
 
 TEST_F(HPACKBufferTests, decode_literal_error) {
@@ -205,14 +210,14 @@ TEST_F(HPACKBufferTests, decode_literal_error) {
   wdata[1] = 'a';
   wdata[2] = 'b';
   string literal;
-  CHECK_EQ(decoder_.decodeLiteral(literal), false);
+  CHECK_EQ(decoder_.decodeLiteral(literal), DecodeError::BUFFER_UNDERFLOW);
 
   resetDecoder();
   // error decoding the size of the literal
   wdata[0] = 0xFF;
   wdata[1] = 0x80;
   wdata[2] = 0x80;
-  EXPECT_EQ(decoder_.decodeLiteral(literal), false);
+  EXPECT_EQ(decoder_.decodeLiteral(literal), DecodeError::BUFFER_UNDERFLOW);
 }
 
 TEST_F(HPACKBufferTests, decode_literal_multi_buffer) {
@@ -239,7 +244,7 @@ TEST_F(HPACKBufferTests, decode_literal_multi_buffer) {
   // decode
   resetDecoder(buf1.get());
   string literal;
-  EXPECT_EQ(decoder_.decodeLiteral(literal), true);
+  EXPECT_EQ(decoder_.decodeLiteral(literal), DecodeError::NONE);
   EXPECT_EQ(literal.size(), size);
   EXPECT_EQ(literal[0], 'x');
   EXPECT_EQ(literal[literal.size() - 1], 'y');
@@ -276,7 +281,7 @@ TEST_F(HPACKBufferTests, decode_huffman_literal_multi_buffer) {
   // decode
   resetDecoder(buf1.get());
   string literal;
-  EXPECT_EQ(decoder_.decodeLiteral(literal), true);
+  EXPECT_EQ(decoder_.decodeLiteral(literal), DecodeError::NONE);
   EXPECT_EQ(literal.size(), 4 * (size / 3));
   EXPECT_EQ(literal.find("gzip"), 0);
   EXPECT_EQ(literal.rfind("gzip"), literal.size() - 4);
@@ -307,7 +312,7 @@ TEST_F(HPACKBufferTests, integer_encode_decode) {
   EXPECT_EQ(decoder_.cursor().length(), 4);
   // now decode
   uint32_t integer;
-  EXPECT_EQ(decoder_.decodeInteger(5, integer), true);
+  EXPECT_EQ(decoder_.decodeInteger(5, integer), DecodeError::NONE);
   EXPECT_EQ(integer, value);
   EXPECT_EQ(decoder_.cursor().length(), 0);
 
@@ -316,8 +321,58 @@ TEST_F(HPACKBufferTests, integer_encode_decode) {
   encoder.encodeInteger(value, 64, 6);
   releaseData(encoder);
   resetDecoder();
-  EXPECT_EQ(decoder_.decodeInteger(6, integer), true);
+  EXPECT_EQ(decoder_.decodeInteger(6, integer), DecodeError::NONE);
   EXPECT_EQ(integer, value);
+}
+
+/**
+ * really large integers
+ */
+TEST_F(HPACKBufferTests, integer_overflow) {
+  uint32_t integer;
+  buf_ = IOBuf::create(128);
+  uint8_t *wdata = buf_->writableData();
+
+  // enough headroom for both cases
+  buf_->append(7);
+  // overflow the accumulated value
+  wdata[0] = 0xFF;
+  wdata[1] = 0xFF;
+  wdata[2] = 0xFF;
+  wdata[3] = 0xFF;
+  wdata[4] = 0xFF;
+  wdata[5] = 0x0F;
+  resetDecoder();
+  EXPECT_EQ(decoder_.decodeInteger(8, integer), DecodeError::INTEGER_OVERFLOW);
+
+  // overflow the factorizer
+  wdata[0] = 0xFF;
+  wdata[1] = 0x80;
+  wdata[2] = 0x80;
+  wdata[3] = 0x80;
+  wdata[4] = 0x80;
+  wdata[5] = 0x80;
+  wdata[6] = 0x01;
+  resetDecoder();
+  EXPECT_EQ(decoder_.decodeInteger(8, integer), DecodeError::INTEGER_OVERFLOW);
+}
+
+/**
+ * test that we're able to decode the max integer
+ */
+TEST_F(HPACKBufferTests, integer_max) {
+  releaseData();
+  // encoding with all the bit prefixes
+  for (uint8_t bitprefix = 1; bitprefix <= 8; bitprefix++) {
+    uint32_t size = encoder_.encodeInteger(std::numeric_limits<uint32_t>::max(),
+                                           0, bitprefix);
+    // take the encoded data and shove it in the decoder
+    releaseData();
+    resetDecoder();
+    uint32_t integer = 0;
+    EXPECT_EQ(decoder_.decodeInteger(bitprefix, integer), DecodeError::NONE);
+    EXPECT_EQ(integer, std::numeric_limits<uint32_t>::max());
+  }
 }
 
 /**
@@ -337,9 +392,26 @@ TEST_F(HPACKBufferTests, empty_iobuf_literal) {
 
   uint32_t size = first->next()->length();
   Cursor cursor(first.get());
-  HPACKDecodeBuffer decoder(HPACK::MessageType::REQ, cursor, size);
+  HPACKDecodeBuffer decoder(huffman::reqHuffTree05(), cursor, size,
+                            kMaxLiteralSize);
   string decoded;
   decoder.decodeLiteral(decoded);
 
   EXPECT_EQ(literal, decoded);
+}
+
+/**
+ * the that we enforce a limit on the literal size
+ */
+TEST_F(HPACKBufferTests, large_literal_error) {
+  uint32_t largeSize = 10 + kMaxLiteralSize;
+  // encode a large string
+  string largeLiteral;
+  largeLiteral.append(largeSize, 'x');
+  EXPECT_TRUE(encoder_.encodeLiteral(largeLiteral));
+  releaseData();
+  resetDecoder();
+  string decoded = "";
+  EXPECT_EQ(decoder_.decodeLiteral(decoded), DecodeError::LITERAL_TOO_LARGE);
+  EXPECT_EQ(decoded.size(), 0);
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,24 +7,22 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/session/ByteEventTracker.h"
-
-#include "proxygen/lib/http/session/HTTPSession.h"
-#include "proxygen/lib/http/session/HTTPSessionStats.h"
+#include <proxygen/lib/http/session/ByteEventTracker.h>
 
 #include <folly/io/async/DelayedDestruction.h>
+#include <proxygen/lib/http/session/HTTPSession.h>
+#include <proxygen/lib/http/session/HTTPSessionStats.h>
 #include <string>
 
-using apache::thrift::async::TAsyncSocket;
-using apache::thrift::async::TAsyncTimeoutSet;
-using apache::thrift::async::TAsyncTransport;
+using folly::AsyncSocket;
+using folly::AsyncTransportWrapper;
 using std::string;
 using std::vector;
 
 namespace proxygen {
 
 ByteEventTracker::~ByteEventTracker() {
-  CHECK(byteEvents_.empty());
+  drainByteEvents();
 }
 
 ByteEventTracker::ByteEventTracker(ByteEventTracker&& other) noexcept {
@@ -32,7 +30,6 @@ ByteEventTracker::ByteEventTracker(ByteEventTracker&& other) noexcept {
   other.nextLastByteEvent_ = nullptr;
 
   byteEvents_ = std::move(other.byteEvents_);
-  CHECK(other.byteEvents_.empty());
 }
 
 void ByteEventTracker::processByteEvents(uint64_t bytesWritten,
@@ -98,7 +95,7 @@ void ByteEventTracker::addLastByteEvent(
     bool eorTrackingEnabled) noexcept {
   VLOG(5) << " adding last byte event for " << byteNo;
   TransactionByteEvent* event = new TransactionByteEvent(
-      byteNo, ByteEvent::LAST_BYTE, HTTPTransaction::CallbackGuard(*txn));
+      byteNo, ByteEvent::LAST_BYTE, txn);
   byteEvents_.push_back(*event);
 
   if (eorTrackingEnabled && !nextLastByteEvent_) {
@@ -131,7 +128,7 @@ void ByteEventTracker::addPingByteEvent(size_t pingSize,
     byteEvents_.push_back(*be);
   } else {
     --i;
-    CHECK(i->byteOffset_ > bytesScheduled);
+    CHECK_GT(i->byteOffset_, bytesScheduled);
     byteEvents_.insert(i.base(), *be);
   }
 }
@@ -141,7 +138,7 @@ uint64_t ByteEventTracker::preSend(bool* cork,
                                    uint64_t bytesWritten) {
   if (nextLastByteEvent_) {
     uint64_t nextLastByteNo = nextLastByteEvent_->byteOffset_;
-    CHECK(nextLastByteNo > bytesWritten);
+    CHECK_GT(nextLastByteNo, bytesWritten);
     uint64_t needed = nextLastByteNo - bytesWritten;
     VLOG(5) << "needed: " << needed << "(" << nextLastByteNo << "-"
             << bytesWritten << ")";
@@ -155,7 +152,8 @@ void ByteEventTracker::addFirstBodyByteEvent(uint64_t offset,
                                              HTTPTransaction* txn) {
   byteEvents_.push_back(
       *new TransactionByteEvent(
-          offset, ByteEvent::FIRST_BYTE, HTTPTransaction::CallbackGuard(*txn)));
+          offset, ByteEvent::FIRST_BYTE,
+          txn));
 }
 
 void ByteEventTracker::addFirstHeaderByteEvent(uint64_t offset,
@@ -165,7 +163,7 @@ void ByteEventTracker::addFirstHeaderByteEvent(uint64_t offset,
   byteEvents_.push_back(
       *new TransactionByteEvent(offset,
                                 ByteEvent::FIRST_HEADER_BYTE,
-                                HTTPTransaction::CallbackGuard(*txn)));
+                                txn));
 }
 
 } // proxygen

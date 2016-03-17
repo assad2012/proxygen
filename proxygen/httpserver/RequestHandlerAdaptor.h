@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,13 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/ResponseHandler.h"
-#include "proxygen/lib/http/session/HTTPTransaction.h"
+#include <proxygen/httpserver/ResponseHandler.h>
+#include <proxygen/lib/http/session/HTTPTransaction.h>
 
 namespace proxygen {
 
 class RequestHandler;
+class PushHandler;
 
 /**
  * An adaptor that converts HTTPTransactionHandler to RequestHandler.
@@ -60,8 +61,10 @@ class RequestHandlerAdaptor
   void refreshTimeout() noexcept override;
   void pauseIngress() noexcept override;
   void resumeIngress() noexcept override;
-  const TransportInfo& getSetupTransportInfo() const noexcept override;
-  void getCurrentTransportInfo(TransportInfo* tinfo) const override;
+  ResponseHandler* newPushedResponse(
+    PushHandler* pushHandler) noexcept override;
+  const wangle::TransportInfo& getSetupTransportInfo() const noexcept override;
+  void getCurrentTransportInfo(wangle::TransportInfo* tinfo) const override;
 
   // Helper method
   void setError(ProxygenError err) noexcept;

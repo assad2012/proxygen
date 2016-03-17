@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,10 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/lib/utils/StateMachine.h"
-
 #include <iostream>
 #include <map>
+#include <proxygen/lib/utils/StateMachine.h>
 
 namespace proxygen {
 
@@ -49,17 +48,7 @@ class HTTPTransactionIngressSMData {
     return State::Start;
   }
 
-  static std::pair<State, bool> find(State s, Event e) {
-    auto it = transitions.find(std::make_pair(s, e));
-    if (it == transitions.end()) {
-      return std::make_pair(s, false);
-    }
-
-    return std::make_pair(it->second, true);
-  }
- private:
-  typedef std::map<std::pair<State, Event>, State> TransitionTable;
-  static const TransitionTable transitions;
+  static std::pair<State, bool> find(State s, Event e);
 };
 
 std::ostream& operator<<(std::ostream& os,

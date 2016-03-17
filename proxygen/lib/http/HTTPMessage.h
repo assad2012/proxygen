@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -8,12 +8,6 @@
  *
  */
 #pragma once
-
-#include "proxygen/lib/http/HTTPHeaderSize.h"
-#include "proxygen/lib/http/HTTPHeaders.h"
-#include "proxygen/lib/http/HTTPMethod.h"
-#include "proxygen/lib/utils/ParseURL.h"
-#include "proxygen/lib/utils/Time.h"
 
 #include <array>
 #include <boost/variant.hpp>
@@ -24,6 +18,11 @@
 #include <glog/logging.h>
 #include <map>
 #include <mutex>
+#include <proxygen/lib/http/HTTPHeaderSize.h>
+#include <proxygen/lib/http/HTTPHeaders.h>
+#include <proxygen/lib/http/HTTPMethod.h>
+#include <proxygen/lib/utils/ParseURL.h>
+#include <proxygen/lib/utils/Time.h>
 #include <string>
 
 namespace proxygen {
@@ -314,6 +313,13 @@ class HTTPMessage {
   uint16_t getStatusCode() const;
 
   /**
+   * Access the push status code
+   */
+  void setPushStatusCode(const uint16_t status);
+  const std::string& getPushStatusStr() const;
+  uint16_t getPushStatusCode() const;
+
+  /**
    * Fill in the fields for a response message header that the server will
    * send directly to the client.
    *
@@ -464,26 +470,51 @@ class HTTPMessage {
     // cipher is a static const char* provided and managed by openssl lib
     sslVersion_ = ver; sslCipher_ = cipher;
   }
-  void setSPDY(uint16_t spdyVersion) { spdy_ = spdyVersion; }
-  bool isSPDY() const { return spdy_; }
-  uint16_t getSPDYVersion() const { return spdy_; }
+  void setAdvancedProtocolString(const std::string& protocol) {
+    protoStr_ = &protocol;
+  }
+  bool isAdvancedProto() const {
+    return protoStr_ != nullptr;
+  }
+  const std::string* getAdvancedProtocolString() const {
+    return protoStr_;
+  }
 
-  /* Setter and getter for the SPDY priority value.
+  /* Setter and getter for the SPDY priority value (0 - 7).  When serialized
+   * to SPDY/2, Codecs will collpase 0,1 -> 0, 2,3 -> 1, etc.
    *
    * Negative values of pri are interpreted much like negative array
    * indexes in python, so -1 will be the largest numerical priority
    * value for this SPDY version (i.e. 3 for SPDY/2 or 7 for SPDY/3),
    * -2 the second largest (i.e. 2 for SPDY/2 or 6 for SPDY/3).
    */
-  void setPriority(int8_t pri) { pri_ = pri; }
-  uint8_t getPriority() const {
-    int8_t pri = pri_;
+  const static int8_t kMaxPriority;
 
-    if (pri < 0) {
-      pri += (getSPDYVersion() > 2) ? 8 : 4;
+  static uint8_t normalizePriority(int8_t pri) {
+    if (pri > kMaxPriority || pri < -kMaxPriority) {
+      // outside [-7, 7] => highest priority
+      return kMaxPriority;
+    } else if (pri < 0) {
+      return pri + kMaxPriority + 1;
     }
-
     return pri;
+  }
+
+  void setPriority(int8_t pri) {
+    pri_ = normalizePriority(pri);
+    h2Pri_ = boost::none;
+  }
+  uint8_t getPriority() const { return pri_; }
+
+  typedef std::tuple<uint32_t, bool, uint8_t> HTTPPriority;
+
+  boost::optional<HTTPPriority> getHTTP2Priority()
+    const {
+    return h2Pri_;
+  }
+
+  void setHTTP2Priority(HTTPPriority h2Pri) {
+    h2Pri_ = h2Pri;
   }
 
   /**
@@ -618,6 +649,9 @@ class HTTPMessage {
     std::string path_;
     std::string query_;
     std::string url_;
+
+    uint16_t pushStatus_;
+    std::string pushStatusStr_;
   };
 
   struct Response {
@@ -688,8 +722,9 @@ class HTTPMessage {
 
   int sslVersion_;
   const char* sslCipher_;
-  uint16_t spdy_; // == 0 - no SPDY; > 0 - SPDY Version
+  const std::string* protoStr_;
   uint8_t pri_;
+  boost::optional<HTTPPriority> h2Pri_;
 
   mutable bool parsedCookies_:1;
   mutable bool parsedQueryParams_:1;

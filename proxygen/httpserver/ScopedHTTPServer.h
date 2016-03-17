@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,11 +9,11 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/HTTPServer.h"
-#include "proxygen/httpserver/ResponseBuilder.h"
-
 #include <boost/thread.hpp>
+#include <folly/io/async/SSLContext.h>
 #include <folly/ThreadName.h>
+#include <proxygen/httpserver/HTTPServer.h>
+#include <proxygen/httpserver/ResponseBuilder.h>
 
 namespace proxygen {
 
@@ -23,18 +23,17 @@ class ScopedHandler : public RequestHandler {
   explicit ScopedHandler(HandlerType* ptr): handlerPtr_(ptr) {
   }
 
-  void onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
+  void onRequest(std::unique_ptr<HTTPMessage> headers) noexcept override {
     request_ = std::move(headers);
   }
 
-  void onBody(std::unique_ptr<folly::IOBuf> body) noexcept {
+  void onBody(std::unique_ptr<folly::IOBuf> body) noexcept override {
     requestBody_.append(std::move(body));
   }
 
-  void onUpgrade(proxygen::UpgradeProtocol proto) noexcept {
-  }
+  void onUpgrade(proxygen::UpgradeProtocol proto) noexcept override {}
 
-  void onEOM() noexcept {
+  void onEOM() noexcept override {
     try {
       ResponseBuilder r(downstream_);
       (*handlerPtr_)(*request_, requestBody_.move(), r);
@@ -52,13 +51,9 @@ class ScopedHandler : public RequestHandler {
     }
   }
 
-  void requestComplete() noexcept {
-    delete this;
-  }
+  void requestComplete() noexcept override { delete this; }
 
-  void onError(ProxygenError err) noexcept {
-    delete this;
-  }
+  void onError(ProxygenError err) noexcept override { delete this; }
  private:
   HandlerType* const handlerPtr_{nullptr};
 
@@ -72,13 +67,13 @@ class ScopedHandlerFactory : public RequestHandlerFactory {
   explicit ScopedHandlerFactory(HandlerType handler): handler_(handler) {
   }
 
-  void onServerStart() noexcept override {
+  void onServerStart(folly::EventBase* evb) noexcept override {
   }
 
   void onServerStop() noexcept override {
   }
 
-  RequestHandler* onRequest(RequestHandler*, HTTPMessage*) noexcept {
+  RequestHandler* onRequest(RequestHandler*, HTTPMessage*) noexcept override {
     return new ScopedHandler<HandlerType>(&handler_);
   }
  private:
@@ -97,18 +92,27 @@ class ScopedHTTPServer final {
    * If `port` is 0, it will choose a random port.
    */
   template <typename HandlerType>
-  static std::unique_ptr<ScopedHTTPServer> start(HandlerType handler,
-                                                 int port = 0,
-                                                 int numThreads = 4);
+  static std::unique_ptr<ScopedHTTPServer> start(
+    HandlerType handler,
+    int port = 0,
+    int numThreads = 4,
+    std::unique_ptr<wangle::SSLContextConfig> sslCfg = nullptr);
 
   /**
    * Get the port the server is listening on. This is helpful if the port was
    * randomly chosen.
    */
   int getPort() const {
+    return getAddresses()[0].address.getPort();
+  }
+
+  /**
+   * Get the addresses for the server.
+   */
+  std::vector<HTTPServer::IPConfig> getAddresses() const {
     auto addresses = server_->addresses();
     CHECK(!addresses.empty());
-    return addresses[0].address.getPort();
+    return addresses;
   }
 
   ~ScopedHTTPServer() {
@@ -131,11 +135,12 @@ template <typename HandlerType>
 inline std::unique_ptr<ScopedHTTPServer> ScopedHTTPServer::start(
     HandlerType handler,
     int port,
-    int numThreads) {
+    int numThreads,
+    std::unique_ptr<wangle::SSLContextConfig> sslCfg) {
 
   std::unique_ptr<RequestHandlerFactory> f =
       folly::make_unique<ScopedHandlerFactory<HandlerType>>(handler);
-  return start(std::move(f), port, numThreads);
+  return start(std::move(f), port, numThreads, std::move(sslCfg));
 }
 
 template <>
@@ -143,15 +148,22 @@ inline std::unique_ptr<ScopedHTTPServer>
 ScopedHTTPServer::start<std::unique_ptr<RequestHandlerFactory>>(
     std::unique_ptr<RequestHandlerFactory> f,
     int port,
-    int numThreads) {
-
+    int numThreads,
+    std::unique_ptr<wangle::SSLContextConfig> sslCfg) {
   // This will handle both IPv4 and IPv6 cases
   folly::SocketAddress addr;
   addr.setFromLocalPort(port);
 
-  std::vector<HTTPServer::IPConfig> IPs = {
-    {addr, HTTPServer::Protocol::HTTP}
+  HTTPServer::IPConfig cfg {
+    addr,
+    HTTPServer::Protocol::HTTP
   };
+
+  if (sslCfg) {
+    cfg.sslConfigs.push_back(*sslCfg.release());
+  }
+
+  std::vector<HTTPServer::IPConfig> IPs = { cfg };
 
   HTTPServerOptions options;
   options.threads = numThreads;

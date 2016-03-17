@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,11 @@
  */
 #pragma once
 
-#include "proxygen/lib/services/Acceptor.h"
-#include "proxygen/lib/services/ConnectionCounter.h"
-
+#include <wangle/acceptor/Acceptor.h>
+#include <wangle/acceptor/ConnectionCounter.h>
+#include <folly/io/async/AsyncServerSocket.h>
 #include <list>
 #include <memory>
-#include <thrift/lib/cpp/async/TAsyncServerSocket.h>
 
 namespace proxygen {
 
@@ -46,7 +45,7 @@ class ServiceWorker {
     return service_;
   }
 
-  void addServiceAcceptor(std::unique_ptr<Acceptor> acceptor) {
+  void addServiceAcceptor(std::unique_ptr<wangle::Acceptor> acceptor) {
     acceptors_.emplace_back(std::move(acceptor));
   }
 
@@ -54,7 +53,7 @@ class ServiceWorker {
     return worker_;
   }
 
-  const std::list<std::unique_ptr<Acceptor>>& getAcceptors() {
+  const std::list<std::unique_ptr<wangle::Acceptor>>& getAcceptors() {
     return acceptors_;
   }
 
@@ -67,14 +66,14 @@ class ServiceWorker {
     acceptors_.clear();
   }
 
-  IConnectionCounter* getConnectionCounter() {
+  wangle::IConnectionCounter* getConnectionCounter() {
     return &connectionCounter_;
   }
 
   virtual void forceStop() {}
 
  protected:
-  SimpleConnectionCounter connectionCounter_;
+  wangle::SimpleConnectionCounter connectionCounter_;
 
  private:
   // Forbidden copy constructor and assignment operator
@@ -96,7 +95,7 @@ class ServiceWorker {
    * A list of the Acceptor objects specific to this worker thread, one
    * Acceptor per VIP.
    */
-  std::list<std::unique_ptr<Acceptor>> acceptors_;
+  std::list<std::unique_ptr<wangle::Acceptor>> acceptors_;
 };
 
 } // proxygen

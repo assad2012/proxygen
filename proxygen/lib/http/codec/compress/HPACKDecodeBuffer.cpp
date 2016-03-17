@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,14 +7,15 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKDecodeBuffer.h"
+#include <proxygen/lib/http/codec/compress/HPACKDecodeBuffer.h>
 
-#include "proxygen/lib/http/codec/compress/Huffman.h"
-
+#include <limits>
 #include <memory>
+#include <proxygen/lib/http/codec/compress/Huffman.h>
 
 using folly::IOBuf;
 using std::unique_ptr;
+using proxygen::HPACK::DecodeError;
 
 namespace proxygen {
 
@@ -23,7 +24,7 @@ bool HPACKDecodeBuffer::empty() {
 }
 
 uint8_t HPACKDecodeBuffer::next() {
-  CHECK(remainingBytes_ > 0);
+  CHECK_GT(remainingBytes_, 0);
   // in case we are the end of an IOBuf, peek() will move to the next one
   uint8_t byte = peek();
   cursor_.skip(1);
@@ -33,27 +34,36 @@ uint8_t HPACKDecodeBuffer::next() {
 }
 
 uint8_t HPACKDecodeBuffer::peek() {
-  CHECK(remainingBytes_ > 0);
+  CHECK_GT(remainingBytes_, 0);
   if (cursor_.length() == 0) {
     cursor_.peek();
   }
   return *cursor_.data();
 }
 
-bool HPACKDecodeBuffer::decodeLiteral(std::string& literal) {
+DecodeError HPACKDecodeBuffer::decodeLiteral(std::string& literal) {
   literal.clear();
   if (remainingBytes_ == 0) {
-    return false;
+    LOG(ERROR) << "remainingBytes_ == 0";
+    return DecodeError::BUFFER_UNDERFLOW;
   }
   auto byte = peek();
   bool huffman = byte & HPACK::LiteralEncoding::HUFFMAN;
   // extract the size
   uint32_t size;
-  if (!decodeInteger(7, size)) {
-    return false;
+  DecodeError result = decodeInteger(7, size);
+  if (result != DecodeError::NONE) {
+    LOG(ERROR) << "Could not decode literal size";
+    return result;
   }
   if (size > remainingBytes_) {
-    return false;
+    LOG(ERROR) << "size > remainingBytes_ decoding literal size="
+               << size << " remainingBytes_=" << remainingBytes_;
+    return DecodeError::BUFFER_UNDERFLOW;
+  }
+  if (size > maxLiteralSize_) {
+    LOG(ERROR) << "Literal too large, size=" << size;
+    return DecodeError::LITERAL_TOO_LARGE;
   }
   const uint8_t* data;
   unique_ptr<IOBuf> tmpbuf;
@@ -69,17 +79,18 @@ bool HPACKDecodeBuffer::decodeLiteral(std::string& literal) {
     data = tmpbuf->data();
   }
   if (huffman) {
-    huffman::decode(msgType_, data, size, literal);
+    huffmanTree_.decode(data, size, literal);
   } else {
     literal.append((const char *)data, size);
   }
   remainingBytes_ -= size;
-  return true;
+  return DecodeError::NONE;
 }
 
-bool HPACKDecodeBuffer::decodeInteger(uint8_t nbit, uint32_t& integer) {
+DecodeError HPACKDecodeBuffer::decodeInteger(uint8_t nbit, uint32_t& integer) {
   if (remainingBytes_ == 0) {
-    return false;
+    LOG(ERROR) << "remainingBytes_ == 0";
+    return DecodeError::BUFFER_UNDERFLOW;
   }
   uint8_t byte = next();
   uint8_t mask = ~HPACK::NBIT_MASKS[nbit] & 0xFF;
@@ -88,18 +99,36 @@ bool HPACKDecodeBuffer::decodeInteger(uint8_t nbit, uint32_t& integer) {
   integer = byte;
   if (byte != mask) {
     // the value fit in one byte
-    return true;
+    return DecodeError::NONE;
   }
   uint32_t f = 1;
+  uint32_t fexp = 0;
   do {
     if (remainingBytes_ == 0) {
-      return false;
+      LOG(ERROR) << "remainingBytes_ == 0";
+      return DecodeError::BUFFER_UNDERFLOW;
     }
     byte = next();
-    integer += (byte & 127) * f;
+    if (fexp > 32) {
+      // overflow in factorizer, f > 2^32
+      LOG(ERROR) << "overflow fexp=" << fexp;
+      return DecodeError::INTEGER_OVERFLOW;
+    }
+    uint32_t add = (byte & 127) * f;
+    if (std::numeric_limits<uint32_t>::max() - integer < add) {
+      // overflow detected
+      LOG(ERROR) << "overflow integer=" << integer << " add=" << add;
+      return DecodeError::INTEGER_OVERFLOW;
+    }
+    integer += add;
     f = f << 7;
+    fexp += 7;
   } while (byte & 128);
-  return true;
+  return DecodeError::NONE;
 }
-
+namespace HPACK {
+std::ostream& operator<<(std::ostream& os, DecodeError err) {
+  return os << static_cast<uint32_t>(err);
+}
+}
 }

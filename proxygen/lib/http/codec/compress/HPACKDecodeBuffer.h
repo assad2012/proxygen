@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,27 +9,31 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKConstants.h"
-
+#include <folly/Conv.h>
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
+#include <proxygen/lib/http/codec/compress/HPACKConstants.h>
+#include <proxygen/lib/http/codec/compress/Huffman.h>
 
 namespace proxygen {
 
 class HPACKDecodeBuffer {
  public:
-  explicit HPACKDecodeBuffer(HPACK::MessageType msgType,
+
+  explicit HPACKDecodeBuffer(const huffman::HuffTree& huffmanTree,
                              folly::io::Cursor& cursorVal,
-                             uint32_t totalBytes)
-      : msgType_(msgType),
+                             uint32_t totalBytes,
+                             uint32_t maxLiteralSize)
+      : huffmanTree_(huffmanTree),
         cursor_(cursorVal),
         totalBytes_(totalBytes),
-        remainingBytes_(totalBytes) {}
+        remainingBytes_(totalBytes),
+        maxLiteralSize_(maxLiteralSize) {}
 
   ~HPACKDecodeBuffer() {}
 
   void reset(folly::io::Cursor& cursorVal) {
-    reset(cursorVal, cursorVal.totalLength());
+    reset(cursorVal, folly::to<uint32_t>(cursorVal.totalLength()));
   }
 
   void reset(folly::io::Cursor& cursorVal,
@@ -67,18 +71,19 @@ class HPACKDecodeBuffer {
    * decode an integer from the current position, given a nbit prefix
    * that basically needs to be ignored
    */
-  bool decodeInteger(uint8_t nbit, uint32_t& integer);
+  HPACK::DecodeError decodeInteger(uint8_t nbit, uint32_t& integer);
 
   /**
    * decode a literal starting from the current position
    */
-  bool decodeLiteral(std::string& literal);
+  HPACK::DecodeError decodeLiteral(std::string& literal);
 
 private:
-  HPACK::MessageType msgType_;
+  const huffman::HuffTree& huffmanTree_;
   folly::io::Cursor& cursor_;
   uint32_t totalBytes_;
   uint32_t remainingBytes_;
+  uint32_t maxLiteralSize_{std::numeric_limits<uint32_t>::max()};
 };
 
 }

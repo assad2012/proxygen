@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,13 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/session/HTTPTransaction.h"
-#include "proxygen/lib/utils/DestructorCheck.h"
-
 #include <folly/Memory.h>
+#include <proxygen/lib/http/session/HTTPTransaction.h>
+#include <proxygen/lib/utils/DestructorCheck.h>
 
 namespace proxygen {
+
+static const std::string kMessageFilterDefaultName_ = "Unknown";
 
 class HTTPMessageFilter: public HTTPTransaction::Handler,
                          public DestructorCheck {
@@ -55,20 +56,23 @@ class HTTPMessageFilter: public HTTPTransaction::Handler,
   }
 
   // These HTTPTransaction::Handler callbacks cannot be overrwritten
-  void setTransaction(HTTPTransaction* txn) noexcept override final {
+  void setTransaction(HTTPTransaction* txn) noexcept final {
     nextTransactionHandler_->setTransaction(txn);
   }
-  void detachTransaction() noexcept override final {
+  void detachTransaction() noexcept final {
     nextTransactionHandler_->detachTransaction();
   }
-  void onEgressPaused() noexcept override final {
+  void onEgressPaused() noexcept final {
     nextTransactionHandler_->onEgressPaused();
   }
-  void onEgressResumed() noexcept override final {
+  void onEgressResumed() noexcept final {
     nextTransactionHandler_->onEgressResumed();
   }
-  void onPushedTransaction(HTTPTransaction* txn) noexcept override final {
+  void onPushedTransaction(HTTPTransaction* txn) noexcept final {
     nextTransactionHandler_->onPushedTransaction(txn);
+  }
+  virtual const std::string& getFilterName() noexcept {
+    return kMessageFilterDefaultName_;
   }
  protected:
   void nextOnHeadersComplete(std::unique_ptr<HTTPMessage> msg) {

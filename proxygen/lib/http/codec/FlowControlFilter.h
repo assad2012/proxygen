@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,8 +9,8 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/Window.h"
-#include "proxygen/lib/http/codec/HTTPCodecFilter.h"
+#include <proxygen/lib/http/Window.h>
+#include <proxygen/lib/http/codec/HTTPCodecFilter.h>
 
 namespace folly {
 class IOBufQueue;
@@ -30,9 +30,10 @@ class FlowControlFilter:
    public:
     virtual ~Callback() {}
     /**
-     * Notification channel to alert when the send window is no longer full.
+     * Notification channel to alert when the send window state changes.
      */
     virtual void onConnectionSendWindowOpen() = 0;
+    virtual void onConnectionSendWindowClosed() = 0;
   };
 
   /**
@@ -43,13 +44,25 @@ class FlowControlFilter:
    *                     may generate a window update frame on this buffer.
    * @param codec        The codec implementation.
    * @param recvCapacity The initial size of the conn-level recv window.
-   *                     It must be >= 65536.
+   *                     It must be >= codec->getDefaultWindowSize(), or it
+   *                     will generate an immediate window update into
+   *                     writeBuf. 0 means use the codec default.
    */
   explicit
   FlowControlFilter(Callback& callback,
                     folly::IOBufQueue& writeBuf,
                     HTTPCodec* codec,
-                    uint32_t recvCapacity);
+                    uint32_t recvCapacity = 0);
+
+  /**
+   * Modify the session receive window
+   *
+   * @param writeBuf     The buffer to write egress on. This constructor
+   *                     may generate a window update frame on this buffer.
+   * @param capacity     The initial size of the conn-level recv window.
+   *                     It must be >= the codec default.
+   */
+  void setReceiveWindowSize(folly::IOBufQueue& writeBuf, uint32_t capacity);
 
   /**
    * Notify the flow control filter that some ingress bytes were
@@ -71,13 +84,15 @@ class FlowControlFilter:
 
   bool isReusable() const override;
 
-  void onBody(StreamID stream, std::unique_ptr<folly::IOBuf> chain) override;
+  void onBody(StreamID stream, std::unique_ptr<folly::IOBuf> chain,
+              uint16_t padding) override;
 
   void onWindowUpdate(StreamID stream, uint32_t amount) override;
 
   size_t generateBody(folly::IOBufQueue& writeBuf,
                       StreamID stream,
                       std::unique_ptr<folly::IOBuf> chain,
+                      boost::optional<uint8_t> padding,
                       bool eom) override;
 
   size_t generateWindowUpdate(folly::IOBufQueue& writeBuf,
@@ -89,7 +104,7 @@ class FlowControlFilter:
   Callback& notify_;
   Window recvWindow_;
   Window sendWindow_;
-  uint32_t toAck_{0};
+  int32_t toAck_{0};
   bool error_:1;
   bool sendsBlocked_:1;
 };

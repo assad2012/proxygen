@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,8 +9,8 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/RequestHandler.h"
-#include "proxygen/httpserver/ResponseHandler.h"
+#include <proxygen/httpserver/RequestHandler.h>
+#include <proxygen/httpserver/ResponseHandler.h>
 
 namespace proxygen {
 
@@ -67,11 +67,11 @@ class Filter : public RequestHandler, public ResponseHandler {
     delete this;
   }
 
-  void onEgressPaused() noexcept {
+  void onEgressPaused() noexcept override {
     upstream_->onEgressPaused();
   }
 
-  void onEgressResumed() noexcept {
+  void onEgressResumed() noexcept override {
     upstream_->onEgressResumed();
   }
 
@@ -112,11 +112,15 @@ class Filter : public RequestHandler, public ResponseHandler {
     downstream_->resumeIngress();
   }
 
-  const TransportInfo& getSetupTransportInfo() const noexcept override {
+  ResponseHandler* newPushedResponse(PushHandler* handler) noexcept override {
+    return downstream_->newPushedResponse(handler);
+  }
+
+  const wangle::TransportInfo& getSetupTransportInfo() const noexcept override {
     return downstream_->getSetupTransportInfo();
   }
 
-  void getCurrentTransportInfo(TransportInfo* tinfo) const override {
+  void getCurrentTransportInfo(wangle::TransportInfo* tinfo) const override {
     downstream_->getCurrentTransportInfo(tinfo);
   }
 

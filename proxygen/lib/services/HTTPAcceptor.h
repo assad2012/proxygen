@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,16 @@
  */
 #pragma once
 
-#include "proxygen/lib/services/Acceptor.h"
-#include "proxygen/lib/services/AcceptorConfiguration.h"
+#include <memory>
+#include <wangle/acceptor/Acceptor.h>
+#include <proxygen/lib/services/AcceptorConfiguration.h>
+#include <proxygen/lib/utils/AsyncTimeoutSet.h>
+#include <folly/io/async/AsyncServerSocket.h>
+#include <proxygen/lib/utils/WheelTimerInstance.h>
 
 namespace proxygen {
 
-class HTTPAcceptor : public Acceptor {
+class HTTPAcceptor : public wangle::Acceptor {
  public:
   explicit HTTPAcceptor(const AcceptorConfiguration& accConfig)
     : Acceptor(accConfig)
@@ -30,16 +34,16 @@ class HTTPAcceptor : public Acceptor {
    /**
    * Access the general-purpose timeout manager for transactions.
    */
-  virtual apache::thrift::async::TAsyncTimeoutSet* getTransactionTimeoutSet() {
-    return transactionTimeouts_.get();
+  virtual const WheelTimerInstance& getTransactionTimeoutSet() {
+    return *timer_;
   }
 
-  virtual void init(apache::thrift::async::TAsyncServerSocket* serverSocket,
-                    folly::EventBase* eventBase) {
+  void init(folly::AsyncServerSocket* serverSocket,
+            folly::EventBase* eventBase,
+            wangle::SSLStats* stat=nullptr) override {
+    timer_ = folly::make_unique<WheelTimerInstance>(
+        accConfig_.transactionIdleTimeout, eventBase);
     Acceptor::init(serverSocket, eventBase);
-    transactionTimeouts_.reset(new apache::thrift::async::TAsyncTimeoutSet(
-                                 eventBase, accConfig_.transactionIdleTimeout));
-
   }
 
   const AcceptorConfiguration& getConfig() const { return accConfig_; }
@@ -47,8 +51,8 @@ class HTTPAcceptor : public Acceptor {
  protected:
   AcceptorConfiguration accConfig_;
  private:
-  apache::thrift::async::TAsyncTimeoutSet::UniquePtr transactionTimeouts_;
-  apache::thrift::async::TAsyncTimeoutSet::UniquePtr tcpEventsTimeouts_;
+  AsyncTimeoutSet::UniquePtr tcpEventsTimeouts_;
+  std::unique_ptr<WheelTimerInstance> timer_;
 };
 
 }

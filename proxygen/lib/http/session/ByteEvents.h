@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,11 +9,10 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/session/HTTPTransaction.h"
-#include "proxygen/lib/utils/Time.h"
-
 #include <folly/IntrusiveList.h>
-#include <thrift/lib/cpp/async/TAsyncTimeoutSet.h>
+#include <proxygen/lib/http/session/HTTPTransaction.h>
+#include <proxygen/lib/utils/AsyncTimeoutSet.h>
+#include <proxygen/lib/utils/Time.h>
 
 namespace proxygen {
 
@@ -44,18 +43,20 @@ class TransactionByteEvent : public ByteEvent {
  public:
   TransactionByteEvent(uint64_t byteNo,
                        EventType eventType,
-                       HTTPTransaction::CallbackGuard cg)
-      : ByteEvent(byteNo, eventType), cg_(cg) {}
+                       HTTPTransaction* txn)
+      : ByteEvent(byteNo, eventType), txn_(txn),
+        g_(HTTPTransaction::DestructorGuard(txn)) {}
 
   HTTPTransaction* getTransaction() override {
-    return &(cg_.peekTransaction());
+    return txn_;
   }
 
-  HTTPTransaction::CallbackGuard cg_; // refcounted transaction
+  HTTPTransaction* txn_;
+  HTTPTransaction::DestructorGuard g_; // refcounted transaction
 };
 
 class AckTimeout
-    : public apache::thrift::async::TAsyncTimeoutSet::Callback {
+    : public AsyncTimeoutSet::Callback {
  public:
   /**
    * The instances of AckTimeout::Callback *MUST* outlive the AckTimeout it is
@@ -70,7 +71,7 @@ class AckTimeout
   AckTimeout(Callback* callback, uint64_t byteNo)
       : callback_(callback), byteNo_(byteNo) {}
 
-  void timeoutExpired() noexcept {
+  void timeoutExpired() noexcept override {
     callback_->ackTimeoutExpired(byteNo_);
   }
 
@@ -84,8 +85,8 @@ class AckByteEvent : public TransactionByteEvent {
   AckByteEvent(AckTimeout::Callback* callback,
                uint64_t byteNo,
                EventType eventType,
-               HTTPTransaction::CallbackGuard cg)
-      : TransactionByteEvent(byteNo, eventType, cg),
+               HTTPTransaction* txn)
+      : TransactionByteEvent(byteNo, eventType, txn),
         timeout(callback, byteNo) {}
 
   AckTimeout timeout;

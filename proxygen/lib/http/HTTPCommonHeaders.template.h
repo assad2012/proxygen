@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -11,6 +11,8 @@
 
 #include <cstdint>
 #include <string>
+
+#include <proxygen/lib/utils/Export.h>
 
 namespace proxygen {
 
@@ -42,20 +44,19 @@ enum HTTPHeaderCode : uint8_t {
 class HTTPCommonHeaders {
  public:
   // Perfect hash function to match common HTTP header names
-  static HTTPHeaderCode hash(const char* name, unsigned len);
+  FB_EXPORT static HTTPHeaderCode hash(const char* name, size_t len);
 
-  inline static HTTPHeaderCode hash(const std::string& name) {
+  FB_EXPORT inline static HTTPHeaderCode hash(const std::string& name) {
     return hash(name.data(), name.length());
   }
 
-  static void initHeaderNames();
+  FB_EXPORT static std::string* initHeaderNames();
 
   inline static const std::string* getPointerToHeaderName(HTTPHeaderCode code) {
-    return headerNames_ + code;
-  }
+    static const auto headerNames = initHeaderNames();
 
- private:
-  static std::string* headerNames_;
+    return headerNames + code;
+  }
 };
 
 } // proxygen

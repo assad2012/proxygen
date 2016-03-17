@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,17 +9,17 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/HTTPHeaders.h"
-#include "proxygen/lib/http/codec/HTTPCodec.h"
-#include "proxygen/lib/http/codec/HTTPSettings.h"
-#include "proxygen/lib/http/codec/SPDYConstants.h"
-#include "proxygen/lib/http/codec/SPDYVersionSettings.h"
-#include "proxygen/lib/http/codec/compress/HPACKCodec.h"
-#include "proxygen/lib/http/codec/compress/HeaderCodec.h"
-
 #include <bitset>
 #include <boost/optional/optional.hpp>
 #include <deque>
+#include <proxygen/lib/http/HTTPHeaders.h>
+#include <proxygen/lib/http/codec/HTTPCodec.h>
+#include <proxygen/lib/http/codec/HTTPParallelCodec.h>
+#include <proxygen/lib/http/codec/HTTPSettings.h>
+#include <proxygen/lib/http/codec/SPDYConstants.h>
+#include <proxygen/lib/http/codec/SPDYVersionSettings.h>
+#include <proxygen/lib/http/codec/compress/HPACKCodec.h>
+#include <proxygen/lib/http/codec/compress/HeaderCodec.h>
 #include <zlib.h>
 
 namespace folly { namespace io {
@@ -33,7 +33,7 @@ namespace proxygen {
  * SPDY. Instances of this class must not be used from multiple threads
  * concurrently.
  */
-class SPDYCodec: public HTTPCodec {
+class SPDYCodec: public HTTPParallelCodec {
 public:
   explicit SPDYCodec(TransportDirection direction,
                      SPDYVersion version,
@@ -42,34 +42,22 @@ public:
 
   static const SPDYVersionSettings& getVersionSettings(SPDYVersion version);
 
-  static const std::string& getHpackNpn();
-
   // HTTPCodec API
   CodecProtocol getProtocol() const override;
-  TransportDirection getTransportDirection() const override {
-    return transportDirection_;
-  }
   bool supportsStreamFlowControl() const override;
   bool supportsSessionFlowControl() const override;
-  StreamID createStream() override;
-  void setCallback(Callback* callback) override { callback_ = callback; }
-  bool isBusy() const override;
-  void setParserPaused(bool paused) override;
   size_t onIngress(const folly::IOBuf& buf) override;
-  void onIngressEOF() override;
-  bool isReusable() const override;
-  bool isWaitingToDrain() const override;
-  bool closeOnEgressComplete() const override { return false; }
-  bool supportsParallelRequests() const override { return true; }
   bool supportsPushTransactions() const override { return true; }
   void generateHeader(folly::IOBufQueue& writeBuf,
                       StreamID stream,
                       const HTTPMessage& msg,
                       StreamID assocStream = 0,
+                      bool eom = false,
                       HTTPHeaderSize* size = nullptr) override;
   size_t generateBody(folly::IOBufQueue& writeBuf,
                       StreamID stream,
                       std::unique_ptr<folly::IOBuf> chain,
+                      boost::optional<uint8_t> padding,
                       bool eom) override;
   size_t generateChunkHeader(folly::IOBufQueue& writeBuf,
                              StreamID stream,
@@ -84,9 +72,11 @@ public:
   size_t generateRstStream(folly::IOBufQueue& writeBuf,
                            StreamID txn,
                            ErrorCode statusCode) override;
-  size_t generateGoaway(folly::IOBufQueue& writeBuf,
-                        StreamID lastStream,
-                        ErrorCode statusCode) override;
+  size_t generateGoaway(
+    folly::IOBufQueue& writeBuf,
+    StreamID lastStream,
+    ErrorCode statusCode,
+    std::unique_ptr<folly::IOBuf> debugData = nullptr) override;
   size_t generatePingRequest(folly::IOBufQueue& writeBuf) override;
   size_t generatePingReply(folly::IOBufQueue& writeBuf,
                            uint64_t uniqueID) override;
@@ -95,20 +85,22 @@ public:
                               StreamID stream,
                               uint32_t delta) override;
   void enableDoubleGoawayDrain() override;
-  StreamID getLastIncomingStreamID() const override { return lastStreamID_; }
 
-  // SPDYCodec specific API
-  void setPrinter(bool printer) { printer_ = printer; }
   /**
    * Returns a const reference to the ingress settings. Since ingress
    * settings are set by the remote end, it doesn't make sense for these
    * to be mutable outside the codec.
    */
-  const HTTPSettings* getIngressSettings() const { return &ingressSettings_; }
+  const HTTPSettings* getIngressSettings() const override {
+    return &ingressSettings_;
+  }
   /**
    * Returns a reference to the egress settings
    */
-  HTTPSettings* getEgressSettings() { return &egressSettings_; }
+  HTTPSettings* getEgressSettings() override { return &egressSettings_; }
+  uint32_t getDefaultWindowSize() const override {
+    return spdy::kInitialWindow;
+  }
 
   uint8_t getVersion() const;
 
@@ -123,6 +115,22 @@ public:
 
   void setHeaderCodecStats(HeaderCodec::Stats* stats) override {
     headerCodec_->setStats(stats);
+  }
+
+  size_t addPriorityNodes(
+      PriorityQueue& queue,
+      folly::IOBufQueue& writeBuf,
+      uint8_t maxLevel) override;
+
+  StreamID mapPriorityToDependency(uint8_t priority) const override {
+    return MAX_STREAM_ID + priority;
+  }
+
+  int8_t mapDependencyToPriority(StreamID parent) const override {
+    if (parent >= MAX_STREAM_ID) {
+      return parent - MAX_STREAM_ID;
+    }
+    return -1;
   }
 
   struct SettingData {
@@ -152,13 +160,6 @@ public:
 
   static void initPerHopHeaders() __attribute__ ((__constructor__));
 
-  // SPDY Frame parsing state
-  enum class FrameState {
-    FRAME_HEADER = 0,
-    CTRL_FRAME_DATA = 1,
-    DATA_FRAME_DATA = 2,
-  };
-
   /**
    * Generates a frame of type SYN_STREAM
    */
@@ -166,6 +167,7 @@ public:
                          StreamID assocStream,
                          folly::IOBufQueue& writeBuf,
                          const HTTPMessage& msg,
+                         bool eom,
                          HTTPHeaderSize* size);
   /**
    * Generates a frame of type SYN_REPLY
@@ -173,6 +175,7 @@ public:
   void generateSynReply(StreamID stream,
                         folly::IOBufQueue& writeBuf,
                         const HTTPMessage& msg,
+                        bool eom,
                         HTTPHeaderSize* size);
 
   /**
@@ -260,11 +263,13 @@ public:
    * @param flags    Bitmap of flags, as defined in the SPDY spec.
    * @param length   Length of the data, in bytes.
    * @return length  Length of the encoded bytes
+   * @return payload data payload
    */
   size_t generateDataFrame(folly::IOBufQueue& writeBuf,
                            uint32_t streamID,
                            uint8_t flags,
-                           uint32_t length);
+                           uint32_t length,
+                           std::unique_ptr<folly::IOBuf> payload);
 
   /**
    * Serializes headers for requests (aka SYN_STREAM)
@@ -331,20 +336,8 @@ public:
    */
   bool rstStatusSupported(int statusCode) const;
 
-  HTTPCodec::Callback* callback_;
-  TransportDirection transportDirection_;
-  StreamID nextEgressStreamID_;
-  StreamID nextEgressPingID_;
-  StreamID lastStreamID_;
-  // StreamID's are 31 bit unsigned integers, so all received goaways will
-  // be lower than this.
-  StreamID ingressGoawayAck_{std::numeric_limits<uint32_t>::max()};
   folly::fbvector<StreamID> closedStreams_;
   const SPDYVersionSettings& versionSettings_;
-  uint32_t maxFrameLength_;
-
-  const folly::IOBuf* currentIngressBuf_;
-  std::unique_ptr<HTTPMessage> partialMsg_;
 
   HTTPSettings ingressSettings_{
     {SettingsId::MAX_CONCURRENT_STREAMS, spdy::kMaxConcurrentStreams},
@@ -355,21 +348,27 @@ public:
     {SettingsId::INITIAL_WINDOW_SIZE, spdy::kInitialWindow}
   };
 
-  FrameState frameState_;
-  uint16_t version_;
-  uint16_t type_;
-  uint32_t streamId_;
-  uint32_t length_;
-  uint8_t flags_;
+  std::unique_ptr<HTTPMessage> partialMsg_;
+  const folly::IOBuf* currentIngressBuf_{nullptr};
 
-  enum ClosingState {
-    OPEN = 0,
-    OPEN_WITH_GRACEFUL_DRAIN_ENABLED = 1,
-    FIRST_GOAWAY_SENT = 2,
-    CLOSING = 3,
-  };
-  ClosingState sessionClosing_:2;
-  bool printer_:1;
+  StreamID nextEgressPingID_;
+  // StreamID's are 31 bit unsigned integers, so all received goaways will
+  // be lower than this.
+
+  uint32_t maxFrameLength_{spdy::kMaxFrameLength};
+  uint32_t streamId_{0};
+  uint32_t length_{0};
+  uint16_t version_{0};
+  uint16_t type_{0xffff};
+  uint8_t flags_{0};
+
+  // SPDY Frame parsing state
+  enum FrameState {
+    FRAME_HEADER = 0,
+    CTRL_FRAME_DATA = 1,
+    DATA_FRAME_DATA = 2,
+  } frameState_:2;
+
   bool ctrl_:1;
 
   std::unique_ptr<HeaderCodec> headerCodec_;

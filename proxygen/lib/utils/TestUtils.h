@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,7 +9,10 @@
  */
 #pragma once
 
+#include <folly/Random.h>
 #include <folly/Range.h>
+#include <folly/io/IOBuf.h>
+#include <folly/io/Cursor.h>
 #include <sys/resource.h>
 
 #ifndef NDEBUG
@@ -24,6 +27,7 @@
 #else
 #define EXPECT_DEATH_NO_CORE(tken, regex) {}
 #endif
+
 
 inline folly::StringPiece
 getContainingDirectory(folly::StringPiece input) {

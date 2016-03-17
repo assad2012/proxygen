@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,9 +9,9 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/Filters.h"
-#include "proxygen/httpserver/RequestHandlerFactory.h"
-#include "proxygen/httpserver/ResponseBuilder.h"
+#include <proxygen/httpserver/Filters.h>
+#include <proxygen/httpserver/RequestHandlerFactory.h>
+#include <proxygen/httpserver/ResponseBuilder.h>
 
 namespace proxygen {
 
@@ -85,7 +85,7 @@ class RejectConnectFilter : public Filter {
 
 class RejectConnectFilterFactory : public RequestHandlerFactory {
  public:
-  void onServerStart() noexcept override {
+  void onServerStart(folly::EventBase* evb) noexcept override {
   }
 
   void onServerStop() noexcept override {

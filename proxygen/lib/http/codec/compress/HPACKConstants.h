@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -10,6 +10,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <iostream>
 
 namespace proxygen {
 
@@ -44,6 +45,21 @@ enum MessageType : uint8_t {
   REQ = 0,
   RESP = 1
 };
+
+enum class DecodeError : uint8_t {
+  NONE = 0,
+  INVALID_INDEX = 1,
+  INVALID_HUFFMAN_CODE = 2,
+  INVALID_ENCODING = 3,
+  INTEGER_OVERFLOW = 4,
+  INVALID_TABLE_SIZE = 5,
+  HEADERS_TOO_LARGE = 6,
+  BUFFER_UNDERFLOW = 7,
+  LITERAL_TOO_LARGE = 8,
+};
+
+std::ostream& operator<<(std::ostream& os, DecodeError err);
+
 
 }
 

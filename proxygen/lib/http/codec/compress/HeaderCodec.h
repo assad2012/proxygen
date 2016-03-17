@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,12 +9,11 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/HTTPHeaderSize.h"
-#include "proxygen/lib/http/codec/compress/Header.h"
-#include "proxygen/lib/http/codec/compress/HeaderPiece.h"
-#include "proxygen/lib/utils/Result.h"
-
 #include <memory>
+#include <proxygen/lib/http/HTTPHeaderSize.h>
+#include <proxygen/lib/http/codec/compress/Header.h>
+#include <proxygen/lib/http/codec/compress/HeaderPiece.h>
+#include <proxygen/lib/utils/Result.h>
 #include <vector>
 
 namespace folly {
@@ -44,7 +43,7 @@ struct HeaderDecodeResult {
 
 class HeaderCodec {
  public:
-  const uint32_t kMaxUncompressed = 80 * 1024;
+  const static uint32_t kMaxUncompressed = 128 * 1024;
 
   enum class Type : uint8_t {
     GZIP = 0,
@@ -59,6 +58,17 @@ class HeaderCodec {
     virtual void recordEncode(Type type, HTTPHeaderSize& size) = 0;
     virtual void recordDecode(Type type, HTTPHeaderSize& size) = 0;
     virtual void recordDecodeError(Type type) = 0;
+    virtual void recordDecodeTooLarge(Type type) = 0;
+  };
+
+  class StreamingCallback {
+   public:
+    virtual ~StreamingCallback() {}
+
+    virtual void onHeader(const std::string& name,
+                          const std::string& value) = 0;
+    virtual void onHeadersComplete() = 0;
+    virtual void onDecodeError(HeaderDecodeError decodeError) = 0;
   };
 
   HeaderCodec() {}
@@ -82,6 +92,12 @@ class HeaderCodec {
    */
   virtual Result<HeaderDecodeResult, HeaderDecodeError>
   decode(folly::io::Cursor& cursor, uint32_t length) noexcept = 0;
+
+  /**
+   * Decode headers given a Cursor and an amount of bytes to consume.
+   */
+  virtual void decodeStreaming(folly::io::Cursor& cursor, uint32_t length,
+      StreamingCallback* streamingCb) noexcept = 0;
 
   /**
    * compressed and uncompressed size of the last encode
@@ -108,6 +124,10 @@ class HeaderCodec {
     maxUncompressed_ = maxUncompressed;
   }
 
+  uint32_t getMaxUncompressed() const {
+    return maxUncompressed_;
+  }
+
   /**
    * set the stats object
    */
@@ -123,6 +143,7 @@ class HeaderCodec {
   HTTPHeaderSize decodedSize_;
   uint32_t maxUncompressed_{kMaxUncompressed};
   Stats* stats_{nullptr};
+  HeaderCodec::StreamingCallback* streamingCb_{nullptr};
 };
 
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,17 +9,22 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/session/TTLBAStats.h"
+#include <chrono>
+#include <inttypes.h>
+#include <proxygen/lib/http/session/TTLBAStats.h>
 
 namespace proxygen {
 
 // This may be retired with a byte events refactor
 class HTTPSessionStats : public TTLBAStats {
  public:
-  virtual ~HTTPSessionStats() noexcept {}
+  ~HTTPSessionStats() noexcept override {}
 
   virtual void recordTransactionOpened() noexcept = 0;
   virtual void recordTransactionClosed() noexcept = 0;
+  virtual void recordTransactionsServed(uint64_t) noexcept = 0;
+  virtual void recordSessionReused() noexcept = 0;
+  virtual void recordSessionIdleTime(std::chrono::seconds) noexcept {};
 };
 
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -11,12 +11,12 @@
 
 #include <cstdint>
 #include <string>
+#include <boost/optional.hpp>
 
 namespace proxygen {
 
 enum class CodecProtocol : uint8_t {
   HTTP_1_1,
-  SPDY_2,
   SPDY_3,
   SPDY_3_1,
   SPDY_3_1_HPACK,
@@ -45,7 +45,22 @@ extern CodecProtocol getCodecProtocolFromStr(const std::string& protocolStr);
 extern bool isSpdyCodecProtocol(CodecProtocol protocol);
 
 /**
- * Returns the maximum priority for the given protocol.
+ * Check if the given protocol is HTTP2.
  */
-extern uint8_t maxProtocolPriority(CodecProtocol);
+extern bool isHTTP2CodecProtocol(CodecProtocol protocol);
+
+/**
+ * Check if the given protocol supports paraellel requests
+ */
+extern bool isParallelCodecProtocol(CodecProtocol protocol);
+
+/**
+ * Search the client and server protocol lists for a matching native
+ * CodecProtocol
+ */
+extern boost::optional<std::pair<CodecProtocol, std::string>>
+checkForProtocolUpgrade(const std::string& clientUpgrade,
+                        const std::string& serverUpgrade,
+                        bool serverMode);
+
 }

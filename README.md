@@ -13,8 +13,6 @@ We have a Google group for general discussions at https://groups.google.com/d/fo
 The [original blog post](https://code.facebook.com/posts/1503205539947302)
 also has more background on the project.
 
-Build Status: [![Build Status](https://travis-ci.org/facebook/proxygen.png?branch=master)](https://travis-ci.org/facebook/proxygen)
-
 ### Installing
 
 Note that currently this project has only been tested on Ubuntu 14.04,
@@ -31,28 +29,30 @@ the dependencies and proxygen. It will also run all the tests. Then run
 `./reinstall.sh` to install it. You can run `./deps.sh && ./reinstall.sh`
 whenever to rebase the dependencies, and then rebuild and reinstall proxygen.
 
-A note on compatibility: this project relies on system installed fbthrift
-and folly. If you rebase proxygen and `make` starts to fail, you likely
-need to update to the latest version of fbthrift and folly. Running
+A note on compatibility: this project relies on system installed
+folly. If you rebase proxygen and `make` starts to fail, you likely
+need to update to the latest version of folly. Running
 `./deps.sh && ./reinstall.sh` will do this for you. We are still working
 on a solution to manage depencies more predictably.
 
 ##### Other Platforms
 
 If you are running on another platform, you may need to install several
-packages first. Proxygen, fbthrift, and folly are all autotools based projects.
+packages first. Proxygen and folly are all autotools based projects.
 
 ### Introduction
 
 Directory structure and contents:
 
-* `proxygen/external/` Contains non-installed 3rd-party code proxygen depends on.
-* `proxygen/lib/` Core networking abstractions.
-* `proxygen/lib/http/` HTTP specific code.
-* `proxygen/lib/services/` Connection management and server code.
-* `proxygen/lib/ssl/` TLS abstractions and OpenSSL wrappers.
-* `proxygen/lib/utils/` Miscellaneous helper code.
-* `proxygen/httpserver/` Contains code wrapping `proxygen/lib/` for building simple C++ http servers. We recommend building on top of these APIs.
+| Directory                  | Purpose                                                                       |
+|----------------------------|-------------------------------------------------------------------------------|
+| `proxygen/external/`       | Contains non-installed 3rd-party code proxygen depends on.                    |
+| `proxygen/lib/`            | Core networking abstractions.                                                 |
+| `proxygen/lib/http/`       | HTTP specific code.                                                           |
+| `proxygen/lib/services/`   | Connection management and server code.                                        |
+| `proxygen/lib/ssl/`        | TLS abstractions and OpenSSL wrappers.                                        |
+| `proxygen/lib/utils/`      | Miscellaneous helper code.                                                    |
+| `proxygen/httpserver/`     | Contains code wrapping `proxygen/lib/` for building simple C++ http servers. We recommend building on top of these APIs. |
 
 ### Architecture
 
@@ -132,7 +132,11 @@ $ curl -v http://localhost:11000/
 We use Doxygen for Proxygen's internal documentation. You can generate a
 copy of these docs by running `doxygen Doxyfile` from the project
 root. You'll want to look at `html/namespaceproxygen.html` to start. This
-will also generate folly and thrift documentation.
+will also generate folly documentation.
+
+### Contributing
+Contribututions to Proxygen are more than welcome. [Read the guidelines in CONTRIBUTING.md](CONTRIBUTING.md).
+Make sure you've [signed the CLA](https://code.facebook.com/cla) before sending in a pull request.
 
 ### Whitehat
 

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,7 +7,7 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/ErrorCode.h"
+#include <proxygen/lib/http/codec/ErrorCode.h>
 
 #include <glog/logging.h>
 
@@ -30,6 +30,7 @@ const char* getErrorCodeString(ErrorCode error) {
     case ErrorCode::CONNECT_ERROR: return "CONNECT_ERROR";
     case ErrorCode::ENHANCE_YOUR_CALM: return "ENHANCE_YOUR_CALM";
     case ErrorCode::INADEQUATE_SECURITY: return "INADEQUATE_SECURITY";
+    case ErrorCode::HTTP_1_1_REQUIRED: return "HTTP_1_1_REQUIRED";
     case ErrorCode::_SPDY_INVALID_STREAM: return "_SPDY_INVALID_STREAM";
   }
   LOG(FATAL) << "Unreachable";

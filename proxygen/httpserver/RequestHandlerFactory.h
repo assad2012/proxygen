@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,7 +9,7 @@
  */
 #pragma once
 
-#include "proxygen/httpserver/RequestHandler.h"
+#include <proxygen/httpserver/RequestHandler.h>
 
 namespace proxygen {
 
@@ -25,7 +25,7 @@ class RequestHandlerFactory {
    * before we start handling requests. Can be used to setup
    * thread-local setup for each thread (stats and such).
    */
-  virtual void onServerStart() noexcept = 0;
+  virtual void onServerStart(folly::EventBase* evb) noexcept = 0;
 
   /**
    * Invoked in each handler thread after all the connections are

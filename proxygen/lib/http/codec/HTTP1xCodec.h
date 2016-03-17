@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,16 +9,14 @@
  */
 #pragma once
 
-#include "proxygen/external/http_parser/http_parser.h"
-#include "proxygen/lib/http/HTTPMessage.h"
-#include "proxygen/lib/http/codec/HTTPCodec.h"
-#include "proxygen/lib/http/codec/TransportDirection.h"
-
+#include <proxygen/lib/http/HTTPMessage.h>
+#include <proxygen/lib/http/codec/HTTPCodec.h>
+#include <proxygen/lib/http/codec/TransportDirection.h>
 #include <string>
 
-namespace proxygen {
+#include <proxygen/external/http_parser/http_parser.h>
 
-struct HTTPHeaderSize;
+namespace proxygen {
 
 class HTTP1xCodec : public HTTPCodec {
  public:
@@ -50,10 +48,12 @@ class HTTP1xCodec : public HTTPCodec {
                       StreamID txn,
                       const HTTPMessage& msg,
                       StreamID assocStream = 0,
+                      bool eom = false,
                       HTTPHeaderSize* size = nullptr) override;
   size_t generateBody(folly::IOBufQueue& writeBuf,
                       StreamID txn,
                       std::unique_ptr<folly::IOBuf> chain,
+                      boost::optional<uint8_t> padding,
                       bool eom) override;
   size_t generateChunkHeader(folly::IOBufQueue& writeBuf,
                              StreamID txn,
@@ -68,9 +68,13 @@ class HTTP1xCodec : public HTTPCodec {
   size_t generateRstStream(folly::IOBufQueue& writeBuf,
                            StreamID txn,
                            ErrorCode statusCode) override;
-  size_t generateGoaway(folly::IOBufQueue& writeBuf,
-                        StreamID lastStream,
-                        ErrorCode statusCode) override;
+  size_t generateGoaway(
+    folly::IOBufQueue& writeBuf,
+    StreamID lastStream,
+    ErrorCode statusCode,
+    std::unique_ptr<folly::IOBuf> debugData = nullptr) override;
+
+  void setAllowedUpgradeProtocols(std::list<std::string> protocols);
 
   /**
    * @returns true if the codec supports the given NPN protocol.
@@ -94,8 +98,8 @@ class HTTP1xCodec : public HTTPCodec {
    * where keep-alive is disabled unless the client requested it. */
   enum class KeepaliveRequested : uint8_t {
     UNSET,
-    YES,  // incoming message requested keepalive
-    NO,   // incoming message disabled keepalive
+    ENABLED,  // incoming message requested keepalive
+    DISABLED,   // incoming message disabled keepalive
   };
 
   void addDateHeader(folly::IOBufQueue& writeBuf, size_t& len);
@@ -139,16 +143,20 @@ class HTTP1xCodec : public HTTPCodec {
   http_parser parser_;
   const folly::IOBuf* currentIngressBuf_;
   std::unique_ptr<HTTPMessage> msg_;
+  std::unique_ptr<HTTPMessage> upgradeRequest_;
   std::unique_ptr<HTTPHeaders> trailers_;
   std::string currentHeaderName_;
   folly::StringPiece currentHeaderNameStringPiece_;
   std::string currentHeaderValue_;
   std::string url_;
   std::string reason_;
+  std::string upgradeHeader_; // last sent/received client upgrade header
+  std::string allowedNativeUpgrades_; // DOWNSTREAM only
   HTTPHeaderSize headerSize_;
   HeaderParseState headerParseState_;
   TransportDirection transportDirection_;
   KeepaliveRequested keepaliveRequested_; // only used in DOWNSTREAM mode
+  std::pair<CodecProtocol, std::string> upgradeResult_; // DOWNSTREAM only
   bool forceUpstream1_1_:1; // Use HTTP/1.1 upstream even if msg is 1.0
   bool parserActive_:1;
   bool pendingEOF_:1;
@@ -171,6 +179,7 @@ class HTTP1xCodec : public HTTPCodec {
   bool ingressUpgrade_:1;
   bool ingressUpgradeComplete_:1;
   bool egressUpgrade_:1;
+  bool nativeUpgrade_:1;
   bool headersComplete_:1;
 
   // C-callable wrappers for the http_parser callbacks

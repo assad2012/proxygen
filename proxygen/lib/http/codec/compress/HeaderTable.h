@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,9 +9,8 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/compress/HPACKHeader.h"
-
 #include <list>
+#include <proxygen/lib/http/codec/compress/HPACKHeader.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -137,6 +136,12 @@ class HeaderTable {
   uint32_t capacity() const {
     return capacity_;
   }
+
+  /**
+   * Sets the current capacity of the header table, and evicts entries
+   * if needed.  capacity must not be larger than currect capacity.
+   */
+  void setCapacity(uint32_t capacity);
 
   /**
    * @return number of entries

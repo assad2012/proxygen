@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -9,11 +9,13 @@
  */
 #pragma once
 
-#include "proxygen/lib/http/codec/SPDYCodec.h"
-#include "proxygen/lib/http/session/HTTPDownstreamSession.h"
-#include "proxygen/lib/http/session/HTTPErrorPage.h"
-#include "proxygen/lib/http/session/SimpleController.h"
-#include "proxygen/lib/services/HTTPAcceptor.h"
+#include <proxygen/lib/http/codec/HTTPCodecFactory.h>
+#include <proxygen/lib/http/codec/SPDYCodec.h>
+#include <proxygen/lib/http/session/HTTPDownstreamSession.h>
+#include <proxygen/lib/http/session/HTTPErrorPage.h>
+#include <proxygen/lib/http/session/SimpleController.h>
+#include <proxygen/lib/services/HTTPAcceptor.h>
+#include <folly/io/async/AsyncSSLSocket.h>
 
 namespace proxygen {
 
@@ -28,7 +30,9 @@ class HTTPSessionAcceptor:
   private HTTPSession::InfoCallback {
 public:
   explicit HTTPSessionAcceptor(const AcceptorConfiguration& accConfig);
-  virtual ~HTTPSessionAcceptor();
+  explicit HTTPSessionAcceptor(const AcceptorConfiguration& accConfig,
+                               std::shared_ptr<HTTPCodecFactory> codecFactory);
+  ~HTTPSessionAcceptor() override;
 
   /**
    * Set the default error page generator.
@@ -70,6 +74,13 @@ public:
       const folly::SocketAddress& addr) const;
 
   /**
+   * Set the codec factory for this session
+   */
+  void setCodecFactory(std::shared_ptr<HTTPCodecFactory> codecFactory) {
+    codecFactory_ = codecFactory;
+  }
+
+  /**
    * Create a Handler for a new transaction.  The transaction and HTTP message
    * (request) are passed so the implementation can construct different
    * handlers based on these.  The transaction will be explicitly set on the
@@ -78,6 +89,14 @@ public:
    */
   virtual HTTPTransaction::Handler* newHandler(
     HTTPTransaction& txn, HTTPMessage* msg) noexcept = 0;
+
+  /**
+   * Set an HTTPSession::InfoCallback to use for each session instead of the
+   * acceptor object.
+   */
+  void setSessionInfoCallback(HTTPSession::InfoCallback* cb) {
+    sessionInfoCb_ = cb;
+  }
 
 protected:
   /**
@@ -94,10 +113,19 @@ protected:
 
   // Acceptor methods
   void onNewConnection(
-      apache::thrift::async::TAsyncSocket::UniquePtr sock,
-      const folly::SocketAddress* address,
-      const std::string& nextProtocol,
-      const TransportInfo& tinfo) override;
+    folly::AsyncTransportWrapper::UniquePtr sock,
+    const folly::SocketAddress* address,
+    const std::string& nextProtocol,
+    SecureTransportType secureTransportType,
+    const wangle::TransportInfo& tinfo) override;
+
+  folly::AsyncSocket::UniquePtr makeNewAsyncSocket(folly::EventBase* base,
+                                                   int fd) override {
+    return folly::AsyncSocket::UniquePtr(
+      new folly::AsyncSocket(base, fd));
+  }
+
+  virtual size_t dropIdleConnections(size_t num);
 
 private:
   HTTPSessionAcceptor(const HTTPSessionAcceptor&) = delete;
@@ -112,15 +140,21 @@ private:
   void onRequestEnd(const HTTPSession&,
                     uint32_t maxIngressQueueSize) override {}
   void onActivateConnection(const HTTPSession&) override {}
-  void onDeactivateConnection(const HTTPSession&) override {}
+  void onDeactivateConnection(const HTTPSession&,
+                              const TransactionInfo&) override {}
   void onDestroy(const HTTPSession&) override {}
   void onIngressMessage(const HTTPSession&, const HTTPMessage&) override {}
   void onIngressLimitExceeded(const HTTPSession&) override {}
   void onIngressPaused(const HTTPSession&) override {}
-  void onTransactionDetached(const HTTPSession&) override {}
-  void onPingReply(int64_t latency) override {}
+  void onTransactionDetached(const HTTPSession&,
+                             const TransactionInfo&) override {}
+  void onPingReplySent(int64_t latency) override {}
+  void onPingReplyReceived() override {}
   void onSettingsOutgoingStreamsFull(const HTTPSession&) override {}
   void onSettingsOutgoingStreamsNotFull(const HTTPSession&) override {}
+  void onFlowControlWindowClosed(const HTTPSession&) override {}
+  void onEgressBuffered(const HTTPSession&) override {}
+  void onEgressBufferCleared(const HTTPSession&) override {}
 
   /** General-case error page generator */
   std::unique_ptr<HTTPErrorPage> defaultErrorPage_;
@@ -128,9 +162,11 @@ private:
   /** Generator of more detailed error pages for internal clients */
   std::unique_ptr<HTTPErrorPage> diagnosticErrorPage_;
 
-  folly::Optional<SPDYVersion> alwaysUseSPDYVersion_{};
+  std::shared_ptr<HTTPCodecFactory> codecFactory_{};
 
   SimpleController simpleController_;
+
+  HTTPSession::InfoCallback* sessionInfoCb_{nullptr};
 
   /**
    * 0.0.0.0:0, a valid address to use if getsockname() or getpeername() fails

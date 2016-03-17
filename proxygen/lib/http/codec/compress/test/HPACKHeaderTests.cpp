@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,11 +7,10 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/codec/compress/HPACKHeader.h"
-
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <proxygen/lib/http/codec/compress/HPACKHeader.h>
 #include <sstream>
 
 using namespace proxygen;

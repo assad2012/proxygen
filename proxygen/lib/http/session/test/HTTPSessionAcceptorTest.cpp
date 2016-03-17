@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,18 +7,17 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/session/HTTPSessionAcceptor.h"
-#include "proxygen/lib/http/session/test/HTTPSessionMocks.h"
-#include "proxygen/lib/utils/TestUtils.h"
-
-#include <thrift/lib/cpp/test/MockTAsyncServerSocket.h>
-#include <thrift/lib/cpp/test/MockTAsyncSocket.h>
+#include <proxygen/lib/http/session/HTTPSessionAcceptor.h>
+#include <proxygen/lib/http/session/test/HTTPSessionMocks.h>
+#include <proxygen/lib/utils/TestUtils.h>
+#include <folly/io/async/test/MockAsyncServerSocket.h>
+#include <folly/io/async/test/MockAsyncSocket.h>
 
 using namespace proxygen;
 using namespace testing;
 
-using apache::thrift::async::TAsyncSocket;
-using apache::thrift::test::MockTAsyncSocket;
+using folly::AsyncSocket;
+using folly::test::MockAsyncSocket;
 using folly::SocketAddress;
 
 namespace {
@@ -44,13 +43,15 @@ class HTTPTargetSessionAcceptor : public HTTPSessionAcceptor {
     sessionsCreated_++;
   }
 
-  void connectionReady(TAsyncSocket::UniquePtr sock,
+  void connectionReady(AsyncSocket::UniquePtr sock,
                        const SocketAddress& clientAddr,
                        const std::string& nextProtocolName,
-                       TransportInfo& tinfo) {
+                       SecureTransportType secureTransportType,
+                       wangle::TransportInfo& tinfo) {
     HTTPSessionAcceptor::connectionReady(std::move(sock),
                                          clientAddr,
                                          nextProtocolName,
+                                         secureTransportType,
                                          tinfo);
   }
 
@@ -72,7 +73,7 @@ class HTTPSessionAcceptorTestBase :
     config_.sslContextConfigs.emplace_back(sslCtxConfig_);
   }
 
-  void SetUp() {
+  void SetUp() override {
     SocketAddress address("127.0.0.1", 0);
     config_.bindAddress = address;
     setupSSL();
@@ -87,10 +88,10 @@ class HTTPSessionAcceptorTestBase :
 
  protected:
   AcceptorConfiguration config_;
-  SSLContextConfig sslCtxConfig_;
+  wangle::SSLContextConfig sslCtxConfig_;
   std::unique_ptr<HTTPTargetSessionAcceptor> acceptor_;
   folly::EventBase eventBase_;
-  apache::thrift::test::MockTAsyncServerSocket mockServerSocket_;
+  folly::test::MockAsyncServerSocket mockServerSocket_;
 };
 
 class HTTPSessionAcceptorTestNPN :
@@ -98,7 +99,7 @@ class HTTPSessionAcceptorTestNPN :
 class HTTPSessionAcceptorTestNPNPlaintext :
     public HTTPSessionAcceptorTestBase {
  public:
-  void setupSSL() {}
+  void setupSSL() override {}
 };
 class HTTPSessionAcceptorTestNPNJunk :
     public HTTPSessionAcceptorTestBase {};
@@ -108,18 +109,26 @@ TEST_P(HTTPSessionAcceptorTestNPN, npn) {
   std::string proto(GetParam());
   if (proto == "") {
     acceptor_->expectedProto_ = "http/1.1";
+  } else if (proto.find("h2") != std::string::npos) {
+    acceptor_->expectedProto_ = "http/2";
   } else {
     acceptor_->expectedProto_ = proto;
   }
 
-  TAsyncSocket::UniquePtr sock(new TAsyncSocket(&eventBase_));
+  AsyncSocket::UniquePtr sock(new AsyncSocket(&eventBase_));
   SocketAddress clientAddress;
-  TransportInfo tinfo;
-  acceptor_->connectionReady(std::move(sock), clientAddress, proto, tinfo);
+  wangle::TransportInfo tinfo;
+  acceptor_->connectionReady(
+      std::move(sock),
+      clientAddress,
+      proto,
+      SecureTransportType::TLS,
+      tinfo);
   EXPECT_EQ(acceptor_->sessionsCreated_, 1);
 }
 
-char const* protos1[] = { "spdy/3", "spdy/2", "http/1.1", "" };
+char const* protos1[] = { "h2-14", "h2", "spdy/3.1", "spdy/3",
+                          "http/1.1", "" };
 INSTANTIATE_TEST_CASE_P(NPNPositive,
                         HTTPSessionAcceptorTestNPN,
                         ::testing::ValuesIn(protos1));
@@ -129,15 +138,24 @@ TEST_P(HTTPSessionAcceptorTestNPNPlaintext, plaintext_protocols) {
   std::string proto(GetParam());
   config_.plaintextProtocol = proto;
   newAcceptor();
-  acceptor_->expectedProto_ = proto;
-  TAsyncSocket::UniquePtr sock(new TAsyncSocket(&eventBase_));
+  if (proto == "h2c") {
+    acceptor_->expectedProto_ = "http/2";
+  } else {
+    acceptor_->expectedProto_ = proto;
+  }
+  AsyncSocket::UniquePtr sock(new AsyncSocket(&eventBase_));
   SocketAddress clientAddress;
-  TransportInfo tinfo;
-  acceptor_->connectionReady(std::move(sock), clientAddress, "", tinfo);
+  wangle::TransportInfo tinfo;
+  acceptor_->connectionReady(
+      std::move(sock),
+      clientAddress,
+      "",
+      SecureTransportType::TLS,
+      tinfo);
   EXPECT_EQ(acceptor_->sessionsCreated_, 1);
 }
 
-char const* protos2[] = { "spdy/3", "spdy/2" };
+char const* protos2[] = { "spdy/3", "h2c" };
 INSTANTIATE_TEST_CASE_P(NPNPlaintext,
                         HTTPSessionAcceptorTestNPNPlaintext,
                         ::testing::ValuesIn(protos2));
@@ -145,10 +163,15 @@ INSTANTIATE_TEST_CASE_P(NPNPlaintext,
 // Verify HTTPSessionAcceptor closes the socket on invalid NPN
 TEST_F(HTTPSessionAcceptorTestNPNJunk, npn) {
   std::string proto("/http/1.1");
-  MockTAsyncSocket::UniquePtr sock(new MockTAsyncSocket(&eventBase_));
+  MockAsyncSocket::UniquePtr sock(new MockAsyncSocket(&eventBase_));
   SocketAddress clientAddress;
-  TransportInfo tinfo;
+  wangle::TransportInfo tinfo;
   EXPECT_CALL(*sock.get(), closeNow());
-  acceptor_->connectionReady(std::move(sock), clientAddress, proto, tinfo);
+  acceptor_->connectionReady(
+      std::move(sock),
+      clientAddress,
+      proto,
+      SecureTransportType::TLS,
+      tinfo);
   EXPECT_EQ(acceptor_->sessionsCreated_, 0);
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -8,7 +8,7 @@
  *
  */
 #define PROXYGEN_HTTPHEADERS_IMPL
-#include "proxygen/lib/http/HTTPHeaders.h"
+#include <proxygen/lib/http/HTTPHeaders.h>
 
 #include <glog/logging.h>
 #include <vector>
@@ -20,6 +20,7 @@ using std::vector;
 namespace proxygen {
 
 const string empty_string;
+const std::string HTTPHeaders::COMBINE_SEPARATOR = ", ";
 
 bitset<256>& HTTPHeaders::perHopHeaderCodes() {
   static bitset<256> perHopHeaderCodes;
@@ -28,8 +29,6 @@ bitset<256>& HTTPHeaders::perHopHeaderCodes() {
 
 void
 HTTPHeaders::initGlobals() {
-  HTTPCommonHeaders::initHeaderNames();
-
   auto& perHopHeaders = perHopHeaderCodes();
   perHopHeaders[HTTP_HEADER_CONNECTION] = true;
   perHopHeaders[HTTP_HEADER_KEEP_ALIVE] = true;
@@ -90,7 +89,8 @@ bool HTTPHeaders::exists(HTTPHeaderCode code) const {
 size_t HTTPHeaders::getNumberOfValues(HTTPHeaderCode code) const {
   size_t count = 0;
   ITERATE_OVER_CODES(code, {
-    ++count;
+      (void)pos;
+      ++count;
   });
   return count;
 }
@@ -289,7 +289,7 @@ HTTPHeaders::stripPerHopHeaders(HTTPHeaders& strippedHeaders) {
       strippedHeaders.headerValues_.push_back(headerValues_[i]);
       codes_[i] = HTTP_HEADER_NONE;
       ++deletedCount_;
-      VLOG(3) << "Stripped hop-by-hop header " << *headerNames_[i];
+      VLOG(5) << "Stripped hop-by-hop header " << *headerNames_[i];
     }
   }
 }

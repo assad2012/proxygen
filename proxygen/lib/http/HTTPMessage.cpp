@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,7 +7,7 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/lib/http/HTTPMessage.h"
+#include <proxygen/lib/http/HTTPMessage.h>
 
 #include <array>
 #include <boost/algorithm/string.hpp>
@@ -40,6 +40,7 @@ std::locale defaultLocale;
 
 namespace proxygen {
 
+const int8_t HTTPMessage::kMaxPriority = 7;
 std::mutex HTTPMessage::mutexDump_;
 
 const pair<uint8_t, uint8_t> HTTPMessage::kHTTPVersion10(1, 0);
@@ -67,7 +68,7 @@ HTTPMessage::HTTPMessage() :
     versionStr_("1.0"),
     fields_(),
     version_(1,0),
-    sslVersion_(0), sslCipher_(nullptr), spdy_(0), pri_(0),
+    sslVersion_(0), sslCipher_(nullptr), protoStr_(nullptr), pri_(0),
     parsedCookies_(false), parsedQueryParams_(false),
     chunked_(false), upgraded_(false), wantsKeepalive_(true),
     trailersAllowed_(false), secure_(false) {
@@ -92,7 +93,9 @@ HTTPMessage::HTTPMessage(const HTTPMessage& message) :
     strippedPerHopHeaders_(message.headers_),
     sslVersion_(message.sslVersion_),
     sslCipher_(message.sslCipher_),
-    spdy_(message.spdy_),
+    protoStr_(message.protoStr_),
+    pri_(message.pri_),
+    h2Pri_(message.h2Pri_),
     parsedCookies_(message.parsedCookies_),
     parsedQueryParams_(message.parsedQueryParams_),
     chunked_(message.chunked_),
@@ -124,7 +127,9 @@ HTTPMessage& HTTPMessage::operator=(const HTTPMessage& message) {
   strippedPerHopHeaders_ = message.headers_;
   sslVersion_ = message.sslVersion_;
   sslCipher_ = message.sslCipher_;
-  spdy_ = message.spdy_;
+  protoStr_ = message.protoStr_;
+  pri_ = message.pri_;
+  h2Pri_ = message.h2Pri_;
   parsedCookies_ = message.parsedCookies_;
   parsedQueryParams_ = message.parsedQueryParams_;
   chunked_ = message.chunked_;
@@ -250,6 +255,19 @@ void HTTPMessage::setStatusCode(uint16_t status) {
 
 uint16_t HTTPMessage::getStatusCode() const {
   return response().status_;
+}
+
+void HTTPMessage::setPushStatusCode(uint16_t status) {
+  request().pushStatus_ = status;
+  request().pushStatusStr_ = folly::to<string>(status);
+}
+
+const std::string& HTTPMessage::getPushStatusStr() const{
+  return request().pushStatusStr_;
+}
+
+uint16_t HTTPMessage::getPushStatusCode() const{
+  return request().pushStatus_;
 }
 
 void
@@ -564,9 +582,9 @@ void HTTPMessage::splitNameValue(
 }
 
 void HTTPMessage::dumpMessage(int vlogLevel) const {
-  VLOG(vlogLevel) << "Version: " << versionStr_
-                  << ", chunked: " << chunked_
-                  << ", upgraded: " << upgraded_;
+  VLOG(vlogLevel) << ", chunked: " << chunked_
+                  << ", upgraded: " << upgraded_
+                  << ", Fields for message:";
 
   // Common fields to both requests and responses.
   std::vector<std::pair<const char*, const std::string*>> fields {{
@@ -585,6 +603,7 @@ void HTTPMessage::dumpMessage(int vlogLevel) const {
     fields.push_back(make_pair("path", &req.path_));
     fields.push_back(make_pair("query", &req.query_));
     fields.push_back(make_pair("url", &req.url_));
+    fields.push_back(make_pair("push_status", &req.pushStatusStr_));
   } else if (fields_.type() == typeid(Response)) {
     // Response fields.
     const Response& resp = response();
@@ -592,7 +611,6 @@ void HTTPMessage::dumpMessage(int vlogLevel) const {
     fields.push_back(make_pair("status_msg", &resp.statusMsg_));
   }
 
-  VLOG(vlogLevel) << "Fields for message: ";
   for (auto field : fields) {
     if (!field.second->empty()) {
       VLOG(vlogLevel) << " " << field.first
@@ -600,9 +618,9 @@ void HTTPMessage::dumpMessage(int vlogLevel) const {
     }
   }
 
-  VLOG(vlogLevel) << "Headers for message: ";
   headers_.forEach([&] (const string& h, const string& v) {
-    VLOG(vlogLevel) << " " << stripCntrlChars(h) << ": " << stripCntrlChars(v);
+    VLOG(vlogLevel) << " " << stripCntrlChars(h) << ": "
+                    << stripCntrlChars(v);
   });
 }
 
@@ -634,6 +652,7 @@ void HTTPMessage::dumpMessageToSink(google::LogSink* logSink) const {
     fields.push_back(make_pair("path", &req.path_));
     fields.push_back(make_pair("query", &req.query_));
     fields.push_back(make_pair("url", &req.url_));
+    fields.push_back(make_pair("push_status", &req.pushStatusStr_));
   } else if (fields_.type() == typeid(Response)) {
     // Response fields.
     const Response& resp = response();
@@ -696,6 +715,12 @@ bool HTTPMessage::checkForHeaderToken(const HTTPHeaderCode headerCode,
                                       char const* token,
                                       bool caseSensitive) const {
   StringPiece tokenPiece(token);
+  string lowerToken;
+  if (!caseSensitive) {
+    lowerToken = token;
+    boost::to_lower(lowerToken, defaultLocale);
+    tokenPiece.reset(lowerToken);
+  }
   // Search through all of the headers with this name.
   // forEachValueOfHeader will return true iff it was "broken" prematurely
   // with "return true" in the lambda-function

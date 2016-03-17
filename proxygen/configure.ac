@@ -72,14 +72,11 @@ AC_CHECK_LIB([ssl], [SSL_library_init], [], [AC_MSG_ERROR([Unable to find libssl
 AC_CHECK_LIB([z], [gzread], [], [AC_MSG_ERROR([Unable to find zlib])])
 AC_CHECK_LIB([folly],[getenv],[],[AC_MSG_ERROR(
              [Please install the folly library from https://github.com/facebook/folly])])
+AC_CHECK_LIB([wangle], [getenv], [], [AC_MSG_ERROR(
+             [Please install the wangle library from https://github.com/facebook/wangle])])
 AC_CHECK_HEADER([folly/Likely.h], [], [AC_MSG_ERROR(
 [Couldn't find folly, please download from https://github.com/facebook/folly]
 )], [])
-
-AC_CHECK_LIB([thriftcpp2], [main], [], [AC_MSG_ERROR(
-[Unable to find thriftcpp2, you need to install FBThrift: https://github.com/facebook/fbthrift])])
-AC_CHECK_LIB([thrift], [main], [], [AC_MSG_ERROR(
-[Unable to find thrift, you need to install FBThrift: https://github.com/facebook/fbthrift])])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
@@ -210,15 +207,10 @@ AC_CHECK_FUNCS([gettimeofday \
                 dup2 \
                 ftruncate])
 
-# Check for python, ruby, and gperf (needed for auto generated code)
+# Check for python and gperf (needed for auto generated code)
 AC_CHECK_PROG(HAVE_PYTHON, python, yes)
 if test x"$HAVE_PYTHON" != x"yes"; then
    AC_MSG_ERROR([Please install python first.])
-fi
-
-AC_CHECK_PROG(HAVE_RUBY, ruby, yes)
-if test x"$HAVE_RUBY" != x"yes"; then
-   AC_MSG_ERROR([Please install ruby first.])
 fi
 
 AC_CHECK_PROG(HAVE_GPERF, gperf, yes)
@@ -237,7 +229,7 @@ AM_CONDITIONAL([HAVE_BITS_FUNCTEXCEPT], [test "$ac_cv_header_bits_functexcept" =
 
 # Include directory that contains "proxygen" so #include "proxygen/Foo.h" works
 # Also add includes for gmock and gtest
-AM_CPPFLAGS='-I$(top_srcdir)/.. -I$(top_srcdir)/lib/test/gmock-1.6.0/include -I$(top_srcdir)/lib/test/gmock-1.6.0/gtest/include'
+AM_CPPFLAGS='-I$(top_srcdir)/.. -I$(top_srcdir)/lib/test/gmock-1.7.0/include -I$(top_srcdir)/lib/test/gmock-1.7.0/gtest/include'
 AM_CPPFLAGS="$AM_CPPFLAGS $CXX_FLAGS $BOOST_CPPFLAGS"
 AC_SUBST([AM_CPPFLAGS])
 
@@ -248,7 +240,6 @@ AC_CONFIG_FILES([Makefile
                  lib/utils/Makefile
                  lib/utils/test/Makefile
                  lib/ssl/Makefile
-                 lib/ssl/test/Makefile
                  lib/services/Makefile
                  lib/http/Makefile
                  lib/http/codec/Makefile
@@ -259,6 +250,9 @@ AC_CONFIG_FILES([Makefile
                  httpserver/Makefile
                  httpserver/samples/Makefile
                  httpserver/samples/echo/Makefile
-                 httpserver/tests/Makefile])
+                 httpserver/tests/Makefile
+                 httpclient/Makefile
+                 httpclient/samples/curl/Makefile
+                 httpclient/samples/Makefile])
 
 AC_OUTPUT

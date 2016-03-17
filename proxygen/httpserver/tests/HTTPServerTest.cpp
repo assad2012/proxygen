@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,22 +7,23 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
-#include "proxygen/httpserver/HTTPServer.h"
-#include "proxygen/httpserver/ResponseBuilder.h"
-#include "proxygen/lib/utils/TestUtils.h"
-
 #include <boost/thread.hpp>
+#include <folly/io/async/AsyncSSLSocket.h>
 #include <folly/io/async/AsyncServerSocket.h>
 #include <folly/io/async/EventBaseManager.h>
 #include <gtest/gtest.h>
+#include <proxygen/httpserver/HTTPServer.h>
+#include <proxygen/httpserver/ResponseBuilder.h>
+#include <proxygen/lib/utils/TestUtils.h>
 
 using namespace proxygen;
 using namespace testing;
 
-using apache::thrift::async::TAsyncSSLSocket;
-using apache::thrift::transport::SSLContext;
+using folly::AsyncSSLSocket;
 using folly::AsyncServerSocket;
 using folly::EventBaseManager;
+using folly::SSLContext;
+using folly::SSLContext;
 using folly::SocketAddress;
 
 namespace {
@@ -108,7 +109,7 @@ TEST(SSL, SSLTest) {
   HTTPServer::IPConfig cfg{
     folly::SocketAddress("127.0.0.1", 0),
       HTTPServer::Protocol::HTTP};
-  SSLContextConfig sslCfg;
+  wangle::SSLContextConfig sslCfg;
   sslCfg.isDefault = true;
   sslCfg.setCertificate(
     kTestDir + "certs/test_cert1.pem",
@@ -128,25 +129,25 @@ TEST(SSL, SSLTest) {
   EXPECT_TRUE(st.start());
 
   // Make an SSL connection to the server
-  class Cb : public apache::thrift::async::TAsyncSocket::ConnectCallback {
+  class Cb : public folly::AsyncSocket::ConnectCallback {
    public:
-    explicit Cb(TAsyncSSLSocket* sock) : sock_(sock) {}
+    explicit Cb(folly::AsyncSSLSocket* sock) : sock_(sock) {}
     void connectSuccess() noexcept override {
       success = true;
       sock_->close();
     }
-    void connectError(const apache::thrift::transport::TTransportException&)
+    void connectErr(const folly::AsyncSocketException&)
       noexcept override {
       success = false;
     }
 
     bool success{false};
-    TAsyncSSLSocket* sock_{nullptr};
+    folly::AsyncSSLSocket* sock_{nullptr};
   };
 
   folly::EventBase evb;
   auto ctx = std::make_shared<SSLContext>();
-  TAsyncSSLSocket::UniquePtr sock(new TAsyncSSLSocket(ctx, &evb));
+  folly::AsyncSSLSocket::UniquePtr sock(new folly::AsyncSSLSocket(ctx, &evb));
   Cb cb(sock.get());
   sock->connect(&cb, server->addresses().front().address, 1000);
   evb.loop();

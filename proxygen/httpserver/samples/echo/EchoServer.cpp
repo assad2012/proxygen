@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2014, Facebook, Inc.
+ *  Copyright (c) 2016, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -7,14 +7,16 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  *
  */
+#include <gflags/gflags.h>
+#include <folly/Memory.h>
+#include <folly/Portability.h>
+#include <folly/io/async/EventBaseManager.h>
+#include <proxygen/httpserver/HTTPServer.h>
+#include <proxygen/httpserver/RequestHandlerFactory.h>
+#include <unistd.h>
+
 #include "EchoHandler.h"
 #include "EchoStats.h"
-#include "proxygen/httpserver/HTTPServer.h"
-#include "proxygen/httpserver/RequestHandlerFactory.h"
-
-#include <folly/Memory.h>
-#include <folly/io/async/EventBaseManager.h>
-#include <unistd.h>
 
 using namespace EchoService;
 using namespace proxygen;
@@ -27,14 +29,14 @@ using Protocol = HTTPServer::Protocol;
 
 DEFINE_int32(http_port, 11000, "Port to listen on with HTTP protocol");
 DEFINE_int32(spdy_port, 11001, "Port to listen on with SPDY protocol");
-DEFINE_int32(thrift_port, 10000, "Port to listen on for thrift");
+DEFINE_int32(h2_port, 11002, "Port to listen on with HTTP/2 protocol");
 DEFINE_string(ip, "localhost", "IP/Hostname to bind to");
 DEFINE_int32(threads, 0, "Number of threads to listen on. Numbers <= 0 "
              "will use the number of cores on this machine.");
 
 class EchoHandlerFactory : public RequestHandlerFactory {
  public:
-  void onServerStart() noexcept override {
+  void onServerStart(folly::EventBase* evb) noexcept override {
     stats_.reset(new EchoStats);
   }
 
@@ -51,13 +53,14 @@ class EchoHandlerFactory : public RequestHandlerFactory {
 };
 
 int main(int argc, char* argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
   google::InstallFailureSignalHandler();
 
   std::vector<HTTPServer::IPConfig> IPs = {
     {SocketAddress(FLAGS_ip, FLAGS_http_port, true), Protocol::HTTP},
     {SocketAddress(FLAGS_ip, FLAGS_spdy_port, true), Protocol::SPDY},
+    {SocketAddress(FLAGS_ip, FLAGS_h2_port, true), Protocol::HTTP2},
   };
 
   if (FLAGS_threads <= 0) {
@@ -69,6 +72,7 @@ int main(int argc, char* argv[]) {
   options.threads = static_cast<size_t>(FLAGS_threads);
   options.idleTimeout = std::chrono::milliseconds(60000);
   options.shutdownOn = {SIGINT, SIGTERM};
+  options.enableContentCompression = true;
   options.handlerFactories = RequestHandlerChain()
       .addThen<EchoHandlerFactory>()
       .build();
